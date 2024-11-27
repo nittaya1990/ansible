@@ -11,20 +11,18 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-from ansible.module_utils._text import to_bytes
+from ansible.module_utils.common.text.converters import to_bytes
 
 from ansible.parsing.vault import VaultSecret
 
 
 class TextVaultSecret(VaultSecret):
-    '''A secret piece of text. ie, a password. Tracks text encoding.
+    """A secret piece of text. ie, a password. Tracks text encoding.
 
     The text encoding of the text may not be the default text encoding so
-    we keep track of the encoding so we encode it to the same bytes.'''
+    we keep track of the encoding so we encode it to the same bytes."""
 
     def __init__(self, text, encoding=None, errors=None, _bytes=None):
         super(TextVaultSecret, self).__init__()
@@ -35,5 +33,5 @@ class TextVaultSecret(VaultSecret):
 
     @property
     def bytes(self):
-        '''The text encoded with encoding, unless we specifically set _bytes.'''
+        """The text encoded with encoding, unless we specifically set _bytes."""
         return self._bytes or to_bytes(self.text, encoding=self.encoding, errors=self.errors)

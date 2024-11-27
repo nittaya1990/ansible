@@ -15,15 +15,14 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import os
 import sys
 import tempfile
 import threading
 import time
+import typing as t
 import multiprocessing.queues
 
 from ansible import constants as C
@@ -33,7 +32,7 @@ from ansible.executor.play_iterator import PlayIterator
 from ansible.executor.stats import AggregateStats
 from ansible.executor.task_result import TaskResult
 from ansible.module_utils.six import string_types
-from ansible.module_utils._text import to_text, to_native
+from ansible.module_utils.common.text.converters import to_text, to_native
 from ansible.playbook.play_context import PlayContext
 from ansible.playbook.task import Task
 from ansible.plugins.loader import callback_loader, strategy_loader, module_loader
@@ -45,6 +44,7 @@ from ansible.utils.display import Display
 from ansible.utils.lock import lock_decorator
 from ansible.utils.multiprocessing import context as multiprocessing_context
 
+from dataclasses import dataclass
 
 __all__ = ['TaskQueueManager']
 
@@ -58,15 +58,31 @@ class CallbackSend:
         self.kwargs = kwargs
 
 
-class FinalQueue(multiprocessing.queues.Queue):
+class DisplaySend:
+    def __init__(self, method, *args, **kwargs):
+        self.method = method
+        self.args = args
+        self.kwargs = kwargs
+
+
+@dataclass
+class PromptSend:
+    worker_id: int
+    prompt: str
+    private: bool = True
+    seconds: int = None
+    interrupt_input: t.Iterable[bytes] = None
+    complete_input: t.Iterable[bytes] = None
+
+
+class FinalQueue(multiprocessing.queues.SimpleQueue):
     def __init__(self, *args, **kwargs):
         kwargs['ctx'] = multiprocessing_context
-        super(FinalQueue, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def send_callback(self, method_name, *args, **kwargs):
         self.put(
             CallbackSend(method_name, *args, **kwargs),
-            block=False
         )
 
     def send_task_result(self, *args, **kwargs):
@@ -76,7 +92,16 @@ class FinalQueue(multiprocessing.queues.Queue):
             tr = TaskResult(*args, **kwargs)
         self.put(
             tr,
-            block=False
+        )
+
+    def send_display(self, method, *args, **kwargs):
+        self.put(
+            DisplaySend(method, *args, **kwargs),
+        )
+
+    def send_prompt(self, **kwargs):
+        self.put(
+            PromptSend(**kwargs),
         )
 
 
@@ -87,7 +112,7 @@ class AnsibleEndPlay(Exception):
 
 class TaskQueueManager:
 
-    '''
+    """
     This class handles the multiprocessing requirements of Ansible by
     creating a pool of worker forks, a result handler fork, and a
     manager object with shared datastructures/queues for coordinating
@@ -95,7 +120,7 @@ class TaskQueueManager:
 
     The queue manager is responsible for loading the play strategy plugin,
     which dispatches the Play's tasks to hosts.
-    '''
+    """
 
     RUN_OK = 0
     RUN_ERROR = 1
@@ -151,11 +176,11 @@ class TaskQueueManager:
             self._workers.append(None)
 
     def load_callbacks(self):
-        '''
+        """
         Loads all available callbacks, with the exception of those which
         utilize the CALLBACK_TYPE option. When CALLBACK_TYPE is set to 'stdout',
         only one such callback plugin will be loaded.
-        '''
+        """
 
         if self._callbacks_loaded:
             return
@@ -198,14 +223,14 @@ class TaskQueueManager:
             callback_type = getattr(callback_plugin, 'CALLBACK_TYPE', '')
             callback_needs_enabled = getattr(callback_plugin, 'CALLBACK_NEEDS_ENABLED', getattr(callback_plugin, 'CALLBACK_NEEDS_WHITELIST', False))
 
-            # try to get colleciotn world name first
+            # try to get collection world name first
             cnames = getattr(callback_plugin, '_redirected_names', [])
             if cnames:
                 # store the name the plugin was loaded as, as that's what we'll need to compare to the configured callback list later
                 callback_name = cnames[0]
             else:
                 # fallback to 'old loader name'
-                (callback_name, _) = os.path.splitext(os.path.basename(callback_plugin._original_path))
+                (callback_name, ext) = os.path.splitext(os.path.basename(callback_plugin._original_path))
 
             display.vvvvv("Attempting to use '%s' callback." % (callback_name))
             if callback_type == 'stdout':
@@ -244,13 +269,13 @@ class TaskQueueManager:
         self._callbacks_loaded = True
 
     def run(self, play):
-        '''
+        """
         Iterates over the roles/tasks in a play, using the given (or default)
         strategy for queueing tasks. The default is the linear strategy, which
         operates like classic Ansible by keeping all hosts in lock-step with
         a given task (meaning no hosts move on to the next task until all hosts
         are done with the current task).
-        '''
+        """
 
         if not self._callbacks_loaded:
             self.load_callbacks()
@@ -337,22 +362,10 @@ class TaskQueueManager:
         self.terminate()
         self._final_q.close()
         self._cleanup_processes()
-
-        # A bug exists in Python 2.6 that causes an exception to be raised during
-        # interpreter shutdown. This is only an issue in our CI testing but we
-        # hit it frequently enough to add a small sleep to avoid the issue.
-        # This can be removed once we have split controller available in CI.
-        #
-        # Further information:
-        #     Issue: https://bugs.python.org/issue4106
-        #     Fix:   https://hg.python.org/cpython/rev/d316315a8781
-        #
-        try:
-            if (2, 6) == (sys.version_info[0:2]):
-                time.sleep(0.0001)
-        except (IndexError, AttributeError):
-            # In case there is an issue getting the version info, don't raise an Exception
-            pass
+        # We no longer flush on every write in ``Display.display``
+        # just ensure we've flushed during cleanup
+        sys.stdout.flush()
+        sys.stderr.flush()
 
     def _cleanup_processes(self):
         if hasattr(self, '_workers'):
@@ -418,7 +431,7 @@ class TaskQueueManager:
             for possible in [method_name, 'v2_on_any']:
                 gotit = getattr(callback_plugin, possible, None)
                 if gotit is None:
-                    gotit = getattr(callback_plugin, possible.replace('v2_', ''), None)
+                    gotit = getattr(callback_plugin, possible.removeprefix('v2_'), None)
                 if gotit is not None:
                     methods.append(gotit)
 

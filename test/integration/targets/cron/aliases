@@ -1,5 +1,4 @@
 destructive
-shippable/posix/group4
-skip/aix
-skip/osx
+needs/root
+shippable/posix/group1
 skip/macos

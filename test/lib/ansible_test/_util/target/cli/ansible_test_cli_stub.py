@@ -4,14 +4,13 @@
 
 # NOTE: This file resides in the _util/target directory to ensure compatibility with all supported Python versions.
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import os
 import sys
 
 
-def main():
+def main(args=None):
     """Main program entry point."""
     ansible_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     source_root = os.path.join(ansible_root, 'test', 'lib')
@@ -27,10 +26,13 @@ def main():
         raise SystemExit('This version of ansible-test cannot be executed with Python version %s. Supported Python versions are: %s' % (
             version_to_str(sys.version_info[:3]), ', '.join(CONTROLLER_PYTHON_VERSIONS)))
 
+    if any(not os.get_blocking(handle.fileno()) for handle in (sys.stdin, sys.stdout, sys.stderr)):
+        raise SystemExit('Standard input, output and error file handles must be blocking to run ansible-test.')
+
     # noinspection PyProtectedMember
     from ansible_test._internal import main as cli_main
 
-    cli_main()
+    cli_main(args)
 
 
 def version_to_str(version):

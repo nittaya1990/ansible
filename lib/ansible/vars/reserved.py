@@ -15,9 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 from ansible.playbook import Play
 from ansible.playbook.block import Block
@@ -29,7 +27,7 @@ display = Display()
 
 
 def get_reserved_names(include_private=True):
-    ''' this function returns the list of reserved names associated with play objects'''
+    """ this function returns the list of reserved names associated with play objects"""
 
     public = set()
     private = set()
@@ -39,14 +37,12 @@ def get_reserved_names(include_private=True):
     class_list = [Play, Role, Block, Task]
 
     for aclass in class_list:
-        aobj = aclass()
-
         # build ordered list to loop over and dict with attributes
-        for attribute in aobj.__dict__['_attributes']:
-            if 'private' in attribute:
-                private.add(attribute)
+        for name, attr in aclass.fattributes.items():
+            if attr.private:
+                private.add(name)
             else:
-                public.add(attribute)
+                public.add(name)
 
     # local_action is implicit with action
     if 'action' in public:
@@ -66,7 +62,7 @@ def get_reserved_names(include_private=True):
 
 
 def warn_if_reserved(myvars, additional=None):
-    ''' this function warns if any variable passed conflicts with internally reserved names '''
+    """ this function warns if any variable passed conflicts with internally reserved names """
 
     if additional is None:
         reserved = _RESERVED_NAMES

@@ -16,8 +16,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import codecs
 import os
@@ -27,7 +26,7 @@ import tempfile
 
 from ansible import constants as C
 from ansible.errors import AnsibleError, AnsibleAction, _AnsibleActionDone, AnsibleActionFail
-from ansible.module_utils._text import to_native, to_text
+from ansible.module_utils.common.text.converters import to_native, to_text
 from ansible.module_utils.parsing.convert_bool import boolean
 from ansible.plugins.action import ActionBase
 from ansible.utils.hashing import checksum_s
@@ -38,7 +37,7 @@ class ActionModule(ActionBase):
     TRANSFERS_FILES = True
 
     def _assemble_from_fragments(self, src_path, delimiter=None, compiled_regexp=None, ignore_hidden=False, decrypt=True):
-        ''' assemble a file from a directory of fragments '''
+        """ assemble a file from a directory of fragments """
 
         tmpfd, temp_path = tempfile.mkstemp(dir=C.DEFAULT_LOCAL_TMP)
         tmp = os.fdopen(tmpfd, 'wb')
@@ -140,7 +139,7 @@ class ActionModule(ActionBase):
 
             if path_checksum != dest_stat['checksum']:
 
-                if self._play_context.diff:
+                if self._task.diff:
                     diff = self._get_diff_data(dest, path, task_vars)
 
                 remote_path = self._connection._shell.join_path(self._connection._shell.tmpdir, 'src')

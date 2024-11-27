@@ -2,20 +2,24 @@
 # (c) 2018, Matt Martz <matt@sivel.net>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 # -*- coding: utf-8 -*-
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import datetime
 import re
+import shlex
+import typing as t
+from tokenize import COMMENT, TokenInfo
 
 import astroid
 
-from pylint.interfaces import IAstroidChecker
-from pylint.checkers import BaseChecker
-from pylint.checkers.utils import check_messages
+try:
+    from pylint.checkers.utils import check_messages
+except ImportError:
+    from pylint.checkers.utils import only_required_for_messages as check_messages
+
+from pylint.checkers import BaseChecker, BaseTokenChecker
 
 from ansible.module_utils.compat.version import LooseVersion
-from ansible.module_utils.six import string_types
 from ansible.release import __version__ as ansible_version_raw
 from ansible.utils.version import SemanticVersion
 
@@ -95,7 +99,7 @@ ANSIBLE_VERSION = LooseVersion('.'.join(ansible_version_raw.split('.')[:3]))
 
 
 def _get_expr_name(node):
-    """Funciton to get either ``attrname`` or ``name`` from ``node.func.expr``
+    """Function to get either ``attrname`` or ``name`` from ``node.func.expr``
 
     Created specifically for the case of ``display.deprecated`` or ``self._display.deprecated``
     """
@@ -106,10 +110,21 @@ def _get_expr_name(node):
         return node.func.expr.name
 
 
+def _get_func_name(node):
+    """Function to get either ``attrname`` or ``name`` from ``node.func``
+
+    Created specifically for the case of ``from ansible.module_utils.common.warnings import deprecate``
+    """
+    try:
+        return node.func.attrname
+    except AttributeError:
+        return node.func.name
+
+
 def parse_isodate(value):
     """Parse an ISO 8601 date string."""
     msg = 'Expected ISO 8601 date string (YYYY-MM-DD)'
-    if not isinstance(value, string_types):
+    if not isinstance(value, str):
         raise ValueError(msg)
     # From Python 3.7 in, there is datetime.date.fromisoformat(). For older versions,
     # we have to do things manually.
@@ -118,7 +133,7 @@ def parse_isodate(value):
     try:
         return datetime.datetime.strptime(value, '%Y-%m-%d').date()
     except ValueError:
-        raise ValueError(msg)
+        raise ValueError(msg) from None
 
 
 class AnsibleDeprecatedChecker(BaseChecker):
@@ -126,7 +141,6 @@ class AnsibleDeprecatedChecker(BaseChecker):
     has not passed or met the time for removal
     """
 
-    __implements__ = (IAstroidChecker,)
     name = 'deprecated'
     msgs = MSGS
 
@@ -145,21 +159,9 @@ class AnsibleDeprecatedChecker(BaseChecker):
         }),
     )
 
-    def __init__(self, *args, **kwargs):
-        self.collection_version = None
-        self.collection_name = None
-        super().__init__(*args, **kwargs)
-
-    def set_option(self, optname, value, action=None, optdict=None):
-        super().set_option(optname, value, action, optdict)
-        if optname == 'collection-version' and value is not None:
-            self.collection_version = SemanticVersion(self.config.collection_version)
-        if optname == 'collection-name' and value is not None:
-            self.collection_name = self.config.collection_name
-
     def _check_date(self, node, date):
         if not isinstance(date, str):
-            self.add_message('invalid-date', node=node, args=(date,))
+            self.add_message('ansible-invalid-deprecated-date', node=node, args=(date,))
             return
 
         try:
@@ -172,8 +174,14 @@ class AnsibleDeprecatedChecker(BaseChecker):
             self.add_message('ansible-deprecated-date', node=node, args=(date,))
 
     def _check_version(self, node, version, collection_name):
+        if collection_name is None:
+            collection_name = 'ansible.builtin'
         if not isinstance(version, (str, float)):
-            self.add_message('invalid-version', node=node, args=(version,))
+            if collection_name == 'ansible.builtin':
+                symbol = 'ansible-invalid-deprecated-version'
+            else:
+                symbol = 'collection-invalid-deprecated-version'
+            self.add_message(symbol, node=node, args=(version,))
             return
 
         version_no = str(version)
@@ -202,6 +210,21 @@ class AnsibleDeprecatedChecker(BaseChecker):
             except ValueError:
                 self.add_message('collection-invalid-deprecated-version', node=node, args=(version,))
 
+    @property
+    def collection_name(self) -> t.Optional[str]:
+        """Return the collection name, or None if ansible-core is being tested."""
+        return self.linter.config.collection_name
+
+    @property
+    def collection_version(self) -> t.Optional[SemanticVersion]:
+        """Return the collection version, or None if ansible-core is being tested."""
+        if self.linter.config.collection_version is None:
+            return None
+        sem_ver = SemanticVersion(self.linter.config.collection_version)
+        # Ignore pre-release for version comparison to catch issues before the final release is cut.
+        sem_ver.prerelease = ()
+        return sem_ver
+
     @check_messages(*(MSGS.keys()))
     def visit_call(self, node):
         """Visit a call node."""
@@ -209,8 +232,9 @@ class AnsibleDeprecatedChecker(BaseChecker):
         date = None
         collection_name = None
         try:
-            if (node.func.attrname == 'deprecated' and 'display' in _get_expr_name(node) or
-                    node.func.attrname == 'deprecate' and _get_expr_name(node)):
+            funcname = _get_func_name(node)
+            if (funcname == 'deprecated' and 'display' in _get_expr_name(node) or
+                    funcname == 'deprecate'):
                 if node.keywords:
                     for keyword in node.keywords:
                         if len(node.keywords) == 1 and keyword.arg is None:
@@ -256,6 +280,119 @@ class AnsibleDeprecatedChecker(BaseChecker):
             pass
 
 
+class AnsibleDeprecatedCommentChecker(BaseTokenChecker):
+    """Checks for ``# deprecated:`` comments to ensure that the ``version``
+    has not passed or met the time for removal
+    """
+
+    name = 'deprecated-comment'
+    msgs = {
+        'E9601': ("Deprecated core version (%r) found: %s",
+                  "ansible-deprecated-version-comment",
+                  "Used when a '# deprecated:' comment specifies a version "
+                  "less than or equal to the current version of Ansible",
+                  {'minversion': (2, 6)}),
+        'E9602': ("Deprecated comment contains invalid keys %r",
+                  "ansible-deprecated-version-comment-invalid-key",
+                  "Used when a '#deprecated:' comment specifies invalid data",
+                  {'minversion': (2, 6)}),
+        'E9603': ("Deprecated comment missing version",
+                  "ansible-deprecated-version-comment-missing-version",
+                  "Used when a '#deprecated:' comment specifies invalid data",
+                  {'minversion': (2, 6)}),
+        'E9604': ("Deprecated python version (%r) found: %s",
+                  "ansible-deprecated-python-version-comment",
+                  "Used when a '#deprecated:' comment specifies a python version "
+                  "less than or equal to the minimum python version",
+                  {'minversion': (2, 6)}),
+        'E9605': ("Deprecated comment contains invalid version %r: %s",
+                  "ansible-deprecated-version-comment-invalid-version",
+                  "Used when a '#deprecated:' comment specifies an invalid version",
+                  {'minversion': (2, 6)}),
+    }
+
+    def process_tokens(self, tokens: list[TokenInfo]) -> None:
+        for token in tokens:
+            if token.type == COMMENT:
+                self._process_comment(token)
+
+    def _deprecated_string_to_dict(self, token: TokenInfo, string: str) -> dict[str, str]:
+        valid_keys = {'description', 'core_version', 'python_version'}
+        data = dict.fromkeys(valid_keys)
+        for opt in shlex.split(string):
+            if '=' not in opt:
+                data[opt] = None
+                continue
+            key, _sep, value = opt.partition('=')
+            data[key] = value
+        if not any((data['core_version'], data['python_version'])):
+            self.add_message(
+                'ansible-deprecated-version-comment-missing-version',
+                line=token.start[0],
+                col_offset=token.start[1],
+            )
+        bad = set(data).difference(valid_keys)
+        if bad:
+            self.add_message(
+                'ansible-deprecated-version-comment-invalid-key',
+                line=token.start[0],
+                col_offset=token.start[1],
+                args=(','.join(bad),)
+            )
+        return data
+
+    def _process_python_version(self, token: TokenInfo, data: dict[str, str]) -> None:
+        check_version = '.'.join(map(str, self.linter.config.py_version))
+
+        try:
+            if LooseVersion(data['python_version']) < LooseVersion(check_version):
+                self.add_message(
+                    'ansible-deprecated-python-version-comment',
+                    line=token.start[0],
+                    col_offset=token.start[1],
+                    args=(
+                        data['python_version'],
+                        data['description'] or 'description not provided',
+                    ),
+                )
+        except (ValueError, TypeError) as exc:
+            self.add_message(
+                'ansible-deprecated-version-comment-invalid-version',
+                line=token.start[0],
+                col_offset=token.start[1],
+                args=(data['python_version'], exc)
+            )
+
+    def _process_core_version(self, token: TokenInfo, data: dict[str, str]) -> None:
+        try:
+            if ANSIBLE_VERSION >= LooseVersion(data['core_version']):
+                self.add_message(
+                    'ansible-deprecated-version-comment',
+                    line=token.start[0],
+                    col_offset=token.start[1],
+                    args=(
+                        data['core_version'],
+                        data['description'] or 'description not provided',
+                    )
+                )
+        except (ValueError, TypeError) as exc:
+            self.add_message(
+                'ansible-deprecated-version-comment-invalid-version',
+                line=token.start[0],
+                col_offset=token.start[1],
+                args=(data['core_version'], exc)
+            )
+
+    def _process_comment(self, token: TokenInfo) -> None:
+        if token.string.startswith('# deprecated:'):
+            data = self._deprecated_string_to_dict(token, token.string[13:].strip())
+            if data['core_version']:
+                self._process_core_version(token, data)
+            if data['python_version']:
+                self._process_python_version(token, data)
+
+
 def register(linter):
     """required method to auto register this checker """
     linter.register_checker(AnsibleDeprecatedChecker(linter))
+    linter.register_checker(AnsibleDeprecatedCommentChecker(linter))

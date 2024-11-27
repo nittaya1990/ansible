@@ -2,19 +2,14 @@
 # Copyright (c) 2018 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 
-import pytest
-
-from units.compat.mock import patch, MagicMock
-from ansible.module_utils._text import to_bytes
+from unittest.mock import patch
+from ansible.module_utils.common.text.converters import to_bytes
 
 from ansible.module_utils import basic
 
@@ -23,7 +18,7 @@ class TestAnsibleModuleSetCwd:
 
     def test_set_cwd(self, monkeypatch):
 
-        '''make sure /tmp is used'''
+        """make sure /tmp is used"""
 
         def mock_getcwd():
             return '/tmp'
@@ -45,7 +40,7 @@ class TestAnsibleModuleSetCwd:
 
     def test_set_cwd_unreadable_use_self_tmpdir(self, monkeypatch):
 
-        '''pwd is not readable, use instance's tmpdir property'''
+        """pwd is not readable, use instance's tmpdir property"""
 
         def mock_getcwd():
             return '/tmp'
@@ -82,7 +77,7 @@ class TestAnsibleModuleSetCwd:
 
     def test_set_cwd_unreadable_use_home(self, monkeypatch):
 
-        '''cwd and instance tmpdir are unreadable, use home'''
+        """cwd and instance tmpdir are unreadable, use home"""
 
         def mock_getcwd():
             return '/tmp'
@@ -119,7 +114,7 @@ class TestAnsibleModuleSetCwd:
 
     def test_set_cwd_unreadable_use_gettempdir(self, monkeypatch):
 
-        '''fallback to tempfile.gettempdir'''
+        """fallback to tempfile.gettempdir"""
 
         thisdir = None
 
@@ -159,7 +154,7 @@ class TestAnsibleModuleSetCwd:
 
     def test_set_cwd_unreadable_use_None(self, monkeypatch):
 
-        '''all paths are unreable, should return None and not an exception'''
+        """all paths are unreable, should return None and not an exception"""
 
         def mock_getcwd():
             return '/tmp'

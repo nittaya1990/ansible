@@ -1,8 +1,7 @@
 # (c) 2013, Jayson Vantuyl <jayson@aggressive.ly>
 # (c) 2012-17 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 DOCUMENTATION = """
     name: sequence
@@ -15,55 +14,55 @@ DOCUMENTATION = """
       - 'Arguments can be specified as key=value pair strings or as a shortcut form of the arguments string is also accepted: [start-]end[/stride][:format].'
       - 'Numerical values can be specified in decimal, hexadecimal (0x3f8) or octal (0600).'
       - Starting at version 1.9.2, negative strides are allowed.
-      - Generated items are strings. Use Jinja2 filters to convert items to preferred type, e.g. ``{{ 1 + item|int }}``.
-      - See also Jinja2 ``range`` filter as an alternative.
+      - Generated items are strings. Use Jinja2 filters to convert items to preferred type, e.g. C({{ 1 + item|int }}).
+      - See also Jinja2 C(range) filter as an alternative.
     options:
       start:
         description: number at which to start the sequence
-        default: 0
+        default: 1
         type: integer
       end:
         description: number at which to end the sequence, dont use this with count
         type: integer
-        default: 0
       count:
         description: number of elements in the sequence, this is not to be used with end
         type: integer
-        default: 0
       stride:
         description: increments between sequence numbers, the default is 1 unless the end is less than the start, then it is -1.
         type: integer
+        default: 1
       format:
         description: return a string with the generated number formatted in
+        default: "%d"
 """
 
 EXAMPLES = """
 - name: create some test users
-  user:
+  ansible.builtin.user:
     name: "{{ item }}"
     state: present
     groups: "evens"
   with_sequence: start=0 end=32 format=testuser%02x
 
 - name: create a series of directories with even numbers for some reason
-  file:
+  ansible.builtin.file:
     dest: "/var/stuff/{{ item }}"
     state: directory
   with_sequence: start=4 end=16 stride=2
 
 - name: a simpler way to use the sequence plugin create 4 groups
-  group:
+  ansible.builtin.group:
     name: "group{{ item }}"
     state: present
   with_sequence: count=4
 
 - name: the final countdown
-  debug:
+  ansible.builtin.debug:
     msg: "{{item}} seconds to detonation"
   with_sequence: start=10 end=0 stride=-1
 
 - name: Use of variable
-  debug:
+  ansible.builtin.debug:
     msg: "{{ item }}"
   with_sequence: start=1 end="{{ end_at }}"
   vars:
@@ -81,7 +80,6 @@ RETURN = """
 from re import compile as re_compile, IGNORECASE
 
 from ansible.errors import AnsibleError
-from ansible.module_utils.six.moves import xrange
 from ansible.parsing.splitter import parse_kv
 from ansible.plugins.lookup import LookupBase
 
@@ -99,6 +97,7 @@ SHORTCUT = re_compile(
     "(:(.+))?$",  # Group 5, Group 6: Format String
     IGNORECASE
 )
+FIELDS = frozenset(('start', 'end', 'stride', 'count', 'format'))
 
 
 class LookupModule(LookupBase):
@@ -140,30 +139,12 @@ class LookupModule(LookupBase):
     calculating the number of entries in a sequence when a stride is specified.
     """
 
-    def reset(self):
-        """set sensible defaults"""
-        self.start = 1
-        self.count = None
-        self.end = None
-        self.stride = 1
-        self.format = "%d"
-
     def parse_kv_args(self, args):
         """parse key-value style arguments"""
-        for arg in ["start", "end", "count", "stride"]:
-            try:
-                arg_raw = args.pop(arg, None)
-                if arg_raw is None:
-                    continue
-                arg_cooked = int(arg_raw, 0)
-                setattr(self, arg, arg_cooked)
-            except ValueError:
-                raise AnsibleError(
-                    "can't parse %s=%s as integer"
-                    % (arg, arg_raw)
-                )
-        if 'format' in args:
-            self.format = args.pop("format")
+        for arg in FIELDS:
+            value = args.pop(arg, None)
+            if value is not None:
+                self.set_option(arg, value)
         if args:
             raise AnsibleError(
                 "unrecognized arguments to with_sequence: %s"
@@ -176,36 +157,26 @@ class LookupModule(LookupBase):
         if not match:
             return False
 
-        _, start, end, _, stride, _, format = match.groups()
+        dummy, start, end, dummy, stride, dummy, format = match.groups()
 
-        if start is not None:
-            try:
-                start = int(start, 0)
-            except ValueError:
-                raise AnsibleError("can't parse start=%s as integer" % start)
-        if end is not None:
-            try:
-                end = int(end, 0)
-            except ValueError:
-                raise AnsibleError("can't parse end=%s as integer" % end)
-        if stride is not None:
-            try:
-                stride = int(stride, 0)
-            except ValueError:
-                raise AnsibleError("can't parse stride=%s as integer" % stride)
-
-        if start is not None:
-            self.start = start
-        if end is not None:
-            self.end = end
-        if stride is not None:
-            self.stride = stride
-        if format is not None:
-            self.format = format
+        for key in FIELDS:
+            value = locals().get(key, None)
+            if value is not None:
+                self.set_option(key, value)
 
         return True
 
+    def set_fields(self):
+        for f in FIELDS:
+            setattr(self, f, self.get_option(f))
+
     def sanity_check(self):
+        """
+        Returns True if options comprise a valid sequence expression
+        Raises AnsibleError if options are an invalid expression
+        Returns false if options are valid but result in an empty sequence - these cases do not raise exceptions
+        in order to maintain historic behavior
+        """
         if self.count is None and self.end is None:
             raise AnsibleError("must specify count or end in with_sequence")
         elif self.count is not None and self.end is not None:
@@ -215,23 +186,24 @@ class LookupModule(LookupBase):
             if self.count != 0:
                 self.end = self.start + self.count * self.stride - 1
             else:
-                self.start = 0
-                self.end = 0
-                self.stride = 0
-            del self.count
+                return False
         if self.stride > 0 and self.end < self.start:
             raise AnsibleError("to count backwards make stride negative")
         if self.stride < 0 and self.end > self.start:
             raise AnsibleError("to count forward don't make stride negative")
+        if self.stride == 0:
+            return False
         if self.format.count('%') != 1:
             raise AnsibleError("bad formatting string: %s" % self.format)
+
+        return True
 
     def generate_sequence(self):
         if self.stride >= 0:
             adjust = 1
         else:
             adjust = -1
-        numbers = xrange(self.start, self.end + adjust, self.stride)
+        numbers = range(self.start, self.end + adjust, self.stride)
 
         for i in numbers:
             try:
@@ -245,9 +217,14 @@ class LookupModule(LookupBase):
     def run(self, terms, variables, **kwargs):
         results = []
 
+        if kwargs and not terms:
+            # All of the necessary arguments can be provided as keywords, but we still need something to loop over
+            terms = ['']
+
         for term in terms:
             try:
-                self.reset()  # clear out things for this iteration
+                # set defaults/global
+                self.set_options(direct=kwargs)
                 try:
                     if not self.parse_simple_args(term):
                         self.parse_kv_args(parse_kv(term))
@@ -256,9 +233,10 @@ class LookupModule(LookupBase):
                 except Exception as e:
                     raise AnsibleError("unknown error parsing with_sequence arguments: %r. Error was: %s" % (term, e))
 
-                self.sanity_check()
-                if self.stride != 0:
+                self.set_fields()
+                if self.sanity_check():
                     results.extend(self.generate_sequence())
+
             except AnsibleError:
                 raise
             except Exception as e:

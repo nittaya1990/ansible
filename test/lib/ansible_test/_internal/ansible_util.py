@@ -3,30 +3,30 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import typing as t
 
 from .constants import (
+    ANSIBLE_BIN_SYMLINK_MAP,
     SOFT_RLIMIT_NOFILE,
-)
-
-from .io import (
-    write_text_file,
 )
 
 from .util import (
     common_environment,
     ApplicationError,
     ANSIBLE_LIB_ROOT,
+    ANSIBLE_TEST_ROOT,
     ANSIBLE_TEST_DATA_ROOT,
-    ANSIBLE_BIN_PATH,
+    ANSIBLE_ROOT,
     ANSIBLE_SOURCE_ROOT,
     ANSIBLE_TEST_TOOLS_ROOT,
-    get_ansible_version,
+    MODE_FILE_EXECUTE,
+    raw_command,
+    verified_chmod,
 )
 
 from .util_common import (
     create_temp_dir,
-    run_command,
     ResultType,
     intercept_python,
     get_injector_path,
@@ -51,8 +51,12 @@ from .host_configs import (
     PythonConfig,
 )
 
+from .thread import (
+    mutex,
+)
 
-def parse_inventory(args, inventory_path):  # type: (EnvironmentConfig, str) -> t.Dict[str, t.Any]
+
+def parse_inventory(args: EnvironmentConfig, inventory_path: str) -> dict[str, t.Any]:
     """Return a dict parsed from the given inventory file."""
     cmd = ['ansible-inventory', '-i', inventory_path, '--list']
     env = ansible_environment(args)
@@ -60,7 +64,7 @@ def parse_inventory(args, inventory_path):  # type: (EnvironmentConfig, str) -> 
     return inventory
 
 
-def get_hosts(inventory, group_name):  # type: (t.Dict[str, t.Any], str) -> t.Dict[str, t.Dict[str, t.Any]]
+def get_hosts(inventory: dict[str, t.Any], group_name: str) -> dict[str, dict[str, t.Any]]:
     """Return a dict of hosts from the specified group in the given inventory."""
     hostvars = inventory.get('_meta', {}).get('hostvars', {})
     group = inventory.get(group_name, {})
@@ -69,13 +73,15 @@ def get_hosts(inventory, group_name):  # type: (t.Dict[str, t.Any], str) -> t.Di
     return hosts
 
 
-def ansible_environment(args, color=True, ansible_config=None):  # type: (CommonConfig, bool, t.Optional[str]) -> t.Dict[str, str]
+def ansible_environment(args: CommonConfig, color: bool = True, ansible_config: t.Optional[str] = None) -> dict[str, str]:
     """Return a dictionary of environment variables to use when running Ansible commands."""
     env = common_environment()
     path = env['PATH']
 
-    if not path.startswith(ANSIBLE_BIN_PATH + os.path.pathsep):
-        path = ANSIBLE_BIN_PATH + os.path.pathsep + path
+    ansible_bin_path = get_ansible_bin_path(args)
+
+    if not path.startswith(ansible_bin_path + os.path.pathsep):
+        path = ansible_bin_path + os.path.pathsep + path
 
     if not ansible_config:
         # use the default empty configuration unless one has been provided
@@ -96,7 +102,6 @@ def ansible_environment(args, color=True, ansible_config=None):  # type: (Common
         ANSIBLE_CONFIG=ansible_config,
         ANSIBLE_LIBRARY='/dev/null',
         ANSIBLE_DEVEL_WARNING='false',  # Don't show warnings that CI is running devel
-        ANSIBLE_JINJA2_NATIVE_WARNING='false',  # Don't show warnings in CI for old Jinja for native
         PYTHONPATH=get_ansible_python_path(args),
         PAGER='/bin/cat',
         PATH=path,
@@ -105,33 +110,35 @@ def ansible_environment(args, color=True, ansible_config=None):  # type: (Common
         # enabled even when not using code coverage to surface warnings when worker processes do not exit cleanly
         ANSIBLE_WORKER_SHUTDOWN_POLL_COUNT='100',
         ANSIBLE_WORKER_SHUTDOWN_POLL_DELAY='0.1',
+        # ansible-test specific environment variables require an 'ANSIBLE_TEST_' prefix to distinguish them from ansible-core env vars defined by config
+        ANSIBLE_TEST_ANSIBLE_LIB_ROOT=ANSIBLE_LIB_ROOT,  # used by the coverage injector
     )
 
     if isinstance(args, IntegrationConfig) and args.coverage:
-        # standard path injection is not effective for ansible-connection, instead the location must be configured
-        # ansible-connection only requires the injector for code coverage
+        # standard path injection is not effective for the persistent connection helper, instead the location must be configured
+        # it only requires the injector for code coverage
         # the correct python interpreter is already selected using the sys.executable used to invoke ansible
-        ansible.update(dict(
-            ANSIBLE_CONNECTION_PATH=os.path.join(get_injector_path(), 'ansible-connection'),
-        ))
+        ansible.update(
+            _ANSIBLE_CONNECTION_PATH=os.path.join(get_injector_path(), 'ansible_connection_cli_stub.py'),
+        )
 
     if isinstance(args, PosixIntegrationConfig):
-        ansible.update(dict(
+        ansible.update(
             ANSIBLE_PYTHON_INTERPRETER='/set/ansible_python_interpreter/in/inventory',  # force tests to set ansible_python_interpreter in inventory
-        ))
+        )
 
     env.update(ansible)
 
     if args.debug:
-        env.update(dict(
+        env.update(
             ANSIBLE_DEBUG='true',
             ANSIBLE_LOG_PATH=os.path.join(ResultType.LOGS.name, 'debug.log'),
-        ))
+        )
 
     if data_context().content.collection:
-        env.update(dict(
+        env.update(
             ANSIBLE_COLLECTIONS_PATH=data_context().content.collection.root,
-        ))
+        )
 
     if data_context().content.is_ansible:
         env.update(configure_plugin_paths(args))
@@ -139,7 +146,7 @@ def ansible_environment(args, color=True, ansible_config=None):  # type: (Common
     return env
 
 
-def configure_plugin_paths(args):  # type: (CommonConfig) -> t.Dict[str, str]
+def configure_plugin_paths(args: CommonConfig) -> dict[str, str]:
     """Return environment variables with paths to plugins relevant for the current command."""
     if not isinstance(args, IntegrationConfig):
         return {}
@@ -193,13 +200,63 @@ def configure_plugin_paths(args):  # type: (CommonConfig) -> t.Dict[str, str]
     return env
 
 
-def get_ansible_python_path(args):  # type: (CommonConfig) -> str
+@mutex
+def get_ansible_bin_path(args: CommonConfig) -> str:
+    """
+    Return a directory usable for PATH, containing only the ansible entry points.
+    If a temporary directory is required, it will be cached for the lifetime of the process and cleaned up at exit.
+    """
+    try:
+        return get_ansible_bin_path.bin_path  # type: ignore[attr-defined]
+    except AttributeError:
+        pass
+
+    if ANSIBLE_SOURCE_ROOT:
+        # when running from source there is no need for a temporary directory since we already have known entry point scripts
+        bin_path = os.path.join(ANSIBLE_ROOT, 'bin')
+    else:
+        # when not running from source the installed entry points cannot be relied upon
+        # doing so would require using the interpreter specified by those entry points, which conflicts with using our interpreter and injector
+        # instead a temporary directory is created which contains only ansible entry points
+        # symbolic links cannot be used since the files are likely not executable
+        bin_path = create_temp_dir(prefix='ansible-test-', suffix='-bin')
+        bin_links = {os.path.join(bin_path, name): get_cli_path(path) for name, path in ANSIBLE_BIN_SYMLINK_MAP.items()}
+
+        if not args.explain:
+            for dst, src in bin_links.items():
+                shutil.copy(src, dst)
+                verified_chmod(dst, MODE_FILE_EXECUTE)
+
+    get_ansible_bin_path.bin_path = bin_path  # type: ignore[attr-defined]
+
+    return bin_path
+
+
+def get_cli_path(path: str) -> str:
+    """Return the absolute path to the CLI script from the given path which is relative to the `bin` directory of the original source tree layout."""
+    path_rewrite = {
+        '../lib/ansible/': ANSIBLE_LIB_ROOT,
+        '../test/lib/ansible_test/': ANSIBLE_TEST_ROOT,
+    }
+
+    for prefix, destination in path_rewrite.items():
+        if path.startswith(prefix):
+            return os.path.join(destination, path[len(prefix):])
+
+    raise RuntimeError(path)
+
+
+# noinspection PyUnusedLocal
+@mutex
+def get_ansible_python_path(args: CommonConfig) -> str:
     """
     Return a directory usable for PYTHONPATH, containing only the ansible package.
     If a temporary directory is required, it will be cached for the lifetime of the process and cleaned up at exit.
     """
+    del args  # not currently used
+
     try:
-        return get_ansible_python_path.python_path
+        return get_ansible_python_path.python_path  # type: ignore[attr-defined]
     except AttributeError:
         pass
 
@@ -214,57 +271,32 @@ def get_ansible_python_path(args):  # type: (CommonConfig) -> str
 
         os.symlink(ANSIBLE_LIB_ROOT, os.path.join(python_path, 'ansible'))
 
-    if not args.explain:
-        generate_egg_info(python_path)
-
-    get_ansible_python_path.python_path = python_path
+    get_ansible_python_path.python_path = python_path  # type: ignore[attr-defined]
 
     return python_path
 
 
-def generate_egg_info(path):  # type: (str) -> None
-    """Generate an egg-info in the specified base directory."""
-    # minimal PKG-INFO stub following the format defined in PEP 241
-    # required for older setuptools versions to avoid a traceback when importing pkg_resources from packages like cryptography
-    # newer setuptools versions are happy with an empty directory
-    # including a stub here means we don't need to locate the existing file or have setup.py generate it when running from source
-    pkg_info = '''
-Metadata-Version: 1.0
-Name: ansible
-Version: %s
-Platform: UNKNOWN
-Summary: Radically simple IT automation
-Author-email: info@ansible.com
-License: GPLv3+
-''' % get_ansible_version()
-
-    pkg_info_path = os.path.join(path, 'ansible_core.egg-info', 'PKG-INFO')
-
-    if os.path.exists(pkg_info_path):
-        return
-
-    write_text_file(pkg_info_path, pkg_info.lstrip(), create_directories=True)
-
-
 class CollectionDetail:
     """Collection detail."""
-    def __init__(self):  # type: () -> None
-        self.version = None  # type: t.Optional[str]
+
+    def __init__(self) -> None:
+        self.version: t.Optional[str] = None
 
 
 class CollectionDetailError(ApplicationError):
     """An error occurred retrieving collection detail."""
-    def __init__(self, reason):  # type: (str) -> None
+
+    def __init__(self, reason: str) -> None:
         super().__init__('Error collecting collection detail: %s' % reason)
         self.reason = reason
 
 
-def get_collection_detail(args, python):  # type: (EnvironmentConfig, PythonConfig) -> CollectionDetail
+def get_collection_detail(python: PythonConfig) -> CollectionDetail:
     """Return collection detail."""
     collection = data_context().content.collection
     directory = os.path.join(collection.root, collection.directory)
 
-    stdout = run_command(args, [python.path, os.path.join(ANSIBLE_TEST_TOOLS_ROOT, 'collection_detail.py'), directory], capture=True, always=True)[0]
+    stdout = raw_command([python.path, os.path.join(ANSIBLE_TEST_TOOLS_ROOT, 'collection_detail.py'), directory], capture=True)[0]
     result = json.loads(stdout)
     error = result.get('error')
 
@@ -280,18 +312,18 @@ def get_collection_detail(args, python):  # type: (EnvironmentConfig, PythonConf
 
 
 def run_playbook(
-        args,  # type: EnvironmentConfig
-        inventory_path,  # type: str
-        playbook,   # type: str
-        run_playbook_vars=None,  # type: t.Optional[t.Dict[str, t.Any]]
-        capture=False,  # type: bool
-):  # type: (...) -> None
+    args: EnvironmentConfig,
+    inventory_path: str,
+    playbook: str,
+    capture: bool,
+    variables: t.Optional[dict[str, t.Any]] = None,
+) -> None:
     """Run the specified playbook using the given inventory file and playbook variables."""
     playbook_path = os.path.join(ANSIBLE_TEST_DATA_ROOT, 'playbooks', playbook)
     cmd = ['ansible-playbook', '-i', inventory_path, playbook_path]
 
-    if run_playbook_vars:
-        cmd.extend(['-e', json.dumps(run_playbook_vars)])
+    if variables:
+        cmd.extend(['-e', json.dumps(variables)])
 
     if args.verbosity:
         cmd.append('-%s' % ('v' * args.verbosity))

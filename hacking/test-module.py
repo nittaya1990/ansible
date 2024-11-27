@@ -23,13 +23,12 @@
 # modules
 #
 # example:
-#    ./hacking/test-module.py -m lib/ansible/modules/commands/command.py -a "/bin/sleep 3"
-#    ./hacking/test-module.py -m lib/ansible/modules/commands/command.py -a "/bin/sleep 3" --debugger /usr/bin/pdb
-#    ./hacking/test-module.py -m lib/ansible/modules/files/lineinfile.py -a "dest=/etc/exports line='/srv/home hostname1(rw,sync)'" --check
-#    ./hacking/test-module.py -m lib/ansible/modules/commands/command.py -a "echo hello" -n -o "test_hello"
+#    ./hacking/test-module.py -m lib/ansible/modules/command.py -a "/bin/sleep 3"
+#    ./hacking/test-module.py -m lib/ansible/modules/command.py -a "/bin/sleep 3" --debugger /usr/bin/pdb
+#    ./hacking/test-module.py -m lib/ansible/modules/lineinfile.py -a "dest=/etc/exports line='/srv/home hostname1(rw,sync)'" --check
+#    ./hacking/test-module.py -m lib/ansible/modules/command.py -a "echo hello" -n -o "test_hello"
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import glob
 import optparse
@@ -39,14 +38,17 @@ import sys
 import traceback
 import shutil
 
+from pathlib import Path
+
 from ansible.release import __version__
 import ansible.utils.vars as utils_vars
 from ansible.parsing.dataloader import DataLoader
 from ansible.parsing.utils.jsonify import jsonify
 from ansible.parsing.splitter import parse_kv
+from ansible.plugins.loader import init_plugin_loader
 from ansible.executor import module_common
 import ansible.constants as C
-from ansible.module_utils._text import to_native, to_text
+from ansible.module_utils.common.text.converters import to_native, to_text
 from ansible.template import Templar
 
 import json
@@ -89,13 +91,11 @@ def parse():
 
 def write_argsfile(argstring, json=False):
     """ Write args to a file for old-style module's use. """
-    argspath = os.path.expanduser("~/.ansible_test_module_arguments")
-    argsfile = open(argspath, 'w')
+    argspath = Path("~/.ansible_test_module_arguments").expanduser()
     if json:
         args = parse_kv(argstring)
         argstring = jsonify(args)
-    argsfile.write(argstring)
-    argsfile.close()
+    argspath.write_text(argstring)
     return argspath
 
 
@@ -169,9 +169,8 @@ def boilerplate_module(modfile, args, interpreters, check, destfile):
     print("* including generated source, if any, saving to: %s" % modfile2_path)
     if module_style not in ('ansiballz', 'old'):
         print("* this may offset any line numbers in tracebacks/debuggers!")
-    modfile2 = open(modfile2_path, 'wb')
-    modfile2.write(module_data)
-    modfile2.close()
+    with open(modfile2_path, 'wb') as modfile2:
+        modfile2.write(module_data)
     modfile = modfile2_path
 
     return (modfile2_path, modname, module_style)
@@ -266,6 +265,7 @@ def rundebug(debugger, modfile, argspath, modname, module_style, interpreters):
 def main():
 
     options, args = parse()
+    init_plugin_loader()
     interpreters = get_interpreters(options.interpreter)
     (modfile, modname, module_style) = boilerplate_module(options.module_path, options.module_args, interpreters, options.check, options.filename)
 

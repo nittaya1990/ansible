@@ -3,9 +3,7 @@
 # Copyright: (c) 2018, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import json
 
@@ -13,7 +11,7 @@ from yaml import YAMLError
 
 from ansible.errors import AnsibleParserError
 from ansible.errors.yaml_strings import YAML_SYNTAX_ERROR
-from ansible.module_utils._text import to_native
+from ansible.module_utils.common.text.converters import to_native
 from ansible.parsing.yaml.loader import AnsibleLoader
 from ansible.parsing.yaml.objects import AnsibleBaseYAMLObject
 from ansible.parsing.ajson import AnsibleJSONDecoder
@@ -23,11 +21,11 @@ __all__ = ('from_yaml',)
 
 
 def _handle_error(json_exc, yaml_exc, file_name, show_content):
-    '''
+    """
     Optionally constructs an object (AnsibleBaseYAMLObject) to encapsulate the
     file name/position where a YAML exception occurred, and raises an AnsibleParserError
     to display the syntax exception information.
-    '''
+    """
 
     # if the YAML exception contains a problem mark, use it to construct
     # an object the error class can use to display the faulty line
@@ -44,7 +42,7 @@ def _handle_error(json_exc, yaml_exc, file_name, show_content):
 
 
 def _safe_load(stream, file_name=None, vault_secrets=None):
-    ''' Implements yaml.safe_load(), except using our custom loader class. '''
+    """ Implements yaml.safe_load(), except using our custom loader class. """
 
     loader = AnsibleLoader(stream, file_name, vault_secrets)
     try:
@@ -57,10 +55,10 @@ def _safe_load(stream, file_name=None, vault_secrets=None):
 
 
 def from_yaml(data, file_name='<string>', show_content=True, vault_secrets=None, json_only=False):
-    '''
+    """
     Creates a python datastructure from the given data, which can be either
     a JSON or YAML string.
-    '''
+    """
     new_data = None
 
     try:

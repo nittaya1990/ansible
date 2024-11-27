@@ -2,18 +2,18 @@
 # (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
     name: minimal
     type: stdout
     short_description: minimal Ansible screen output
     version_added: historical
     description:
         - This is the default output callback used by the ansible command (ad-hoc)
-'''
+    extends_documentation_fragment:
+      - result_format_callback
+"""
 
 from ansible.plugins.callback import CallbackBase
 from ansible import constants as C
@@ -21,17 +21,17 @@ from ansible import constants as C
 
 class CallbackModule(CallbackBase):
 
-    '''
+    """
     This is the default callback interface, which simply prints messages
     to stdout when new callback events are received.
-    '''
+    """
 
     CALLBACK_VERSION = 2.0
     CALLBACK_TYPE = 'stdout'
     CALLBACK_NAME = 'minimal'
 
     def _command_generic_msg(self, host, result, caption):
-        ''' output the result of a command run '''
+        """ output the result of a command run """
 
         buf = "%s | %s | rc=%s >>\n" % (host, caption, result.get('rc', -1))
         buf += result.get('stdout', '')

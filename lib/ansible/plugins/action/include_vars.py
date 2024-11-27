@@ -1,16 +1,16 @@
 # Copyright: (c) 2016, Allen Sanabria <asanabria@linuxdynasty.org>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 from os import path, walk
 import re
+import pathlib
 
 import ansible.constants as C
 from ansible.errors import AnsibleError
 from ansible.module_utils.six import string_types
-from ansible.module_utils._text import to_native, to_text
+from ansible.module_utils.common.text.converters import to_native, to_text
 from ansible.plugins.action import ActionBase
 from ansible.utils.vars import combine_vars
 
@@ -23,6 +23,7 @@ class ActionModule(ActionBase):
     VALID_DIR_ARGUMENTS = ['dir', 'depth', 'files_matching', 'ignore_files', 'extensions', 'ignore_unknown_extensions']
     VALID_FILE_ARGUMENTS = ['file', '_raw_params']
     VALID_ALL = ['name', 'hash_behaviour']
+    _requires_connection = False
 
     def _set_dir_defaults(self):
         if not self.depth:
@@ -100,6 +101,7 @@ class ActionModule(ActionBase):
         self._set_args()
 
         results = dict()
+        failed = False
         if self.source_dir:
             self._set_dir_defaults()
             self._set_root_dir()
@@ -140,9 +142,8 @@ class ActionModule(ActionBase):
             result['message'] = err_msg
         elif self.hash_behaviour is not None and self.hash_behaviour != C.DEFAULT_HASH_BEHAVIOUR:
             merge_hashes = self.hash_behaviour == 'merge'
-            for key, value in results.items():
-                old_value = task_vars.get(key, None)
-                results[key] = combine_vars(old_value, value, merge=merge_hashes)
+            existing_variables = {k: v for k, v in task_vars.items() if k in results}
+            results = combine_vars(existing_variables, results, merge=merge_hashes)
 
         result['ansible_included_var_files'] = self.included_files
         result['ansible_facts'] = results
@@ -172,21 +173,23 @@ class ActionModule(ActionBase):
                 )
                 self.source_dir = path.join(current_dir, self.source_dir)
 
+    def _log_walk(self, error):
+        self._display.vvv('Issue with walking through "%s": %s' % (to_native(error.filename), to_native(error)))
+
     def _traverse_dir_depth(self):
         """ Recursively iterate over a directory and sort the files in
             alphabetical order. Do not iterate pass the set depth.
             The default depth is unlimited.
         """
-        current_depth = 0
-        sorted_walk = list(walk(self.source_dir))
+        sorted_walk = list(walk(self.source_dir, onerror=self._log_walk, followlinks=True))
         sorted_walk.sort(key=lambda x: x[0])
         for current_root, current_dir, current_files in sorted_walk:
-            current_depth += 1
-            if current_depth <= self.depth or self.depth == 0:
-                current_files.sort()
-                yield (current_root, current_files)
-            else:
-                break
+            # Depth 1 is the root, relative_to omits the root
+            current_depth = len(pathlib.Path(current_root).relative_to(self.source_dir).parts) + 1
+            if self.depth != 0 and current_depth > self.depth:
+                continue
+            current_files.sort()
+            yield (current_root, current_files)
 
     def _ignore_file(self, filename):
         """ Return True if a file matches the list of ignore_files.
@@ -233,7 +236,8 @@ class ActionModule(ActionBase):
             b_data, show_content = self._loader._get_file_contents(filename)
             data = to_text(b_data, errors='surrogate_or_strict')
 
-            self.show_content = show_content
+            self.show_content &= show_content  # mask all results if any file was encrypted
+
             data = self._loader.load(data, file_name=filename, show_content=show_content)
             if not data:
                 data = dict()

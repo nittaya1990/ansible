@@ -15,12 +15,12 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import re
 import traceback
+
+from collections.abc import Sequence
 
 from ansible.errors.yaml_strings import (
     YAML_COMMON_DICT_ERROR,
@@ -32,12 +32,11 @@ from ansible.errors.yaml_strings import (
     YAML_POSITION_DETAILS,
     YAML_AND_SHORTHAND_ERROR,
 )
-from ansible.module_utils._text import to_native, to_text
-from ansible.module_utils.common._collections_compat import Sequence
+from ansible.module_utils.common.text.converters import to_native, to_text
 
 
 class AnsibleError(Exception):
-    '''
+    """
     This is the base class for all errors raised from Ansible code,
     and can be instantiated with two optional parameters beyond the
     error message to control whether detailed information is displayed
@@ -49,7 +48,7 @@ class AnsibleError(Exception):
 
     Where "obj" is some subclass of ansible.parsing.yaml.objects.AnsibleBaseYAMLObject,
     which should be returned by the DataLoader() class.
-    '''
+    """
 
     def __init__(self, message="", obj=None, show_content=True, suppress_extended_error=False, orig_exc=None):
         super(AnsibleError, self).__init__(message)
@@ -67,14 +66,18 @@ class AnsibleError(Exception):
         from ansible.parsing.yaml.objects import AnsibleBaseYAMLObject
 
         message = [self._message]
+
+        # Add from previous exceptions
+        if self.orig_exc:
+            message.append('. %s' % to_native(self.orig_exc))
+
+        # Add from yaml to give specific file/line no
         if isinstance(self.obj, AnsibleBaseYAMLObject):
             extended_error = self._get_extended_error()
             if extended_error and not self._suppress_extended_error:
                 message.append(
                     '\n\n%s' % to_native(extended_error)
                 )
-        elif self.orig_exc:
-            message.append('. %s' % to_native(self.orig_exc))
 
         return ''.join(message)
 
@@ -89,11 +92,11 @@ class AnsibleError(Exception):
         return self.message
 
     def _get_error_lines_from_file(self, file_name, line_number):
-        '''
+        """
         Returns the line in the file which corresponds to the reported error
         location, as well as the line preceding it (if the error did not
         occur on the first line), to provide context to the error.
-        '''
+        """
 
         target_line = ''
         prev_line = ''
@@ -122,7 +125,7 @@ class AnsibleError(Exception):
         return (target_line, prev_line)
 
     def _get_extended_error(self):
-        '''
+        """
         Given an object reporting the location of the exception in a file, return
         detailed information regarding it including:
 
@@ -131,7 +134,7 @@ class AnsibleError(Exception):
 
         If this error was created with show_content=False, the reporting of content
         is suppressed, as the file contents may be sensitive (ie. vault data).
-        '''
+        """
 
         error_message = ''
 
@@ -210,73 +213,86 @@ class AnsibleError(Exception):
         return error_message
 
 
+class AnsiblePromptInterrupt(AnsibleError):
+    """User interrupt"""
+
+
+class AnsiblePromptNoninteractive(AnsibleError):
+    """Unable to get user input"""
+
+
 class AnsibleAssertionError(AnsibleError, AssertionError):
-    '''Invalid assertion'''
+    """Invalid assertion"""
     pass
 
 
 class AnsibleOptionsError(AnsibleError):
-    ''' bad or incomplete options passed '''
+    """ bad or incomplete options passed """
+    pass
+
+
+class AnsibleRequiredOptionError(AnsibleOptionsError):
+    """ bad or incomplete options passed """
     pass
 
 
 class AnsibleParserError(AnsibleError):
-    ''' something was detected early that is wrong about a playbook or data file '''
+    """ something was detected early that is wrong about a playbook or data file """
     pass
 
 
 class AnsibleInternalError(AnsibleError):
-    ''' internal safeguards tripped, something happened in the code that should never happen '''
+    """ internal safeguards tripped, something happened in the code that should never happen """
     pass
 
 
 class AnsibleRuntimeError(AnsibleError):
-    ''' ansible had a problem while running a playbook '''
+    """ ansible had a problem while running a playbook """
     pass
 
 
 class AnsibleModuleError(AnsibleRuntimeError):
-    ''' a module failed somehow '''
+    """ a module failed somehow """
     pass
 
 
 class AnsibleConnectionFailure(AnsibleRuntimeError):
-    ''' the transport / connection_plugin had a fatal error '''
+    """ the transport / connection_plugin had a fatal error """
     pass
 
 
 class AnsibleAuthenticationFailure(AnsibleConnectionFailure):
-    '''invalid username/password/key'''
+    """invalid username/password/key"""
     pass
 
 
 class AnsibleCallbackError(AnsibleRuntimeError):
-    ''' a callback failure '''
+    """ a callback failure """
     pass
 
 
 class AnsibleTemplateError(AnsibleRuntimeError):
-    '''A template related error'''
+    """A template related error"""
     pass
 
 
 class AnsibleFilterError(AnsibleTemplateError):
-    ''' a templating failure '''
+    """ a templating failure """
     pass
 
 
 class AnsibleLookupError(AnsibleTemplateError):
-    ''' a lookup failure '''
+    """ a lookup failure """
     pass
 
 
 class AnsibleUndefinedVariable(AnsibleTemplateError):
-    ''' a templating failure '''
+    """ a templating failure """
     pass
 
 
 class AnsibleFileNotFound(AnsibleRuntimeError):
-    ''' a file missing failure '''
+    """ a file missing failure """
 
     def __init__(self, message="", obj=None, show_content=True, suppress_extended_error=False, orig_exc=None, paths=None, file_name=None):
 
@@ -306,7 +322,7 @@ class AnsibleFileNotFound(AnsibleRuntimeError):
 # DO NOT USE as they will probably be removed soon.
 # We will port the action modules in our tree to use a context manager instead.
 class AnsibleAction(AnsibleRuntimeError):
-    ''' Base Exception for Action plugin flow control '''
+    """ Base Exception for Action plugin flow control """
 
     def __init__(self, message="", obj=None, show_content=True, suppress_extended_error=False, orig_exc=None, result=None):
 
@@ -319,7 +335,7 @@ class AnsibleAction(AnsibleRuntimeError):
 
 
 class AnsibleActionSkip(AnsibleAction):
-    ''' an action runtime skip'''
+    """ an action runtime skip"""
 
     def __init__(self, message="", obj=None, show_content=True, suppress_extended_error=False, orig_exc=None, result=None):
         super(AnsibleActionSkip, self).__init__(message=message, obj=obj, show_content=show_content,
@@ -328,7 +344,7 @@ class AnsibleActionSkip(AnsibleAction):
 
 
 class AnsibleActionFail(AnsibleAction):
-    ''' an action runtime failure'''
+    """ an action runtime failure"""
     def __init__(self, message="", obj=None, show_content=True, suppress_extended_error=False, orig_exc=None, result=None):
         super(AnsibleActionFail, self).__init__(message=message, obj=obj, show_content=show_content,
                                                 suppress_extended_error=suppress_extended_error, orig_exc=orig_exc, result=result)
@@ -336,32 +352,37 @@ class AnsibleActionFail(AnsibleAction):
 
 
 class _AnsibleActionDone(AnsibleAction):
-    ''' an action runtime early exit'''
+    """ an action runtime early exit"""
     pass
 
 
 class AnsiblePluginError(AnsibleError):
-    ''' base class for Ansible plugin-related errors that do not need AnsibleError contextual data '''
+    """ base class for Ansible plugin-related errors that do not need AnsibleError contextual data """
     def __init__(self, message=None, plugin_load_context=None):
         super(AnsiblePluginError, self).__init__(message)
         self.plugin_load_context = plugin_load_context
 
 
 class AnsiblePluginRemovedError(AnsiblePluginError):
-    ''' a requested plugin has been removed '''
+    """ a requested plugin has been removed """
     pass
 
 
 class AnsiblePluginCircularRedirect(AnsiblePluginError):
-    '''a cycle was detected in plugin redirection'''
+    """a cycle was detected in plugin redirection"""
     pass
 
 
 class AnsibleCollectionUnsupportedVersionError(AnsiblePluginError):
-    '''a collection is not supported by this version of Ansible'''
+    """a collection is not supported by this version of Ansible"""
     pass
 
 
 class AnsibleFilterTypeError(AnsibleTemplateError, TypeError):
-    ''' a Jinja filter templating failure due to bad type'''
+    """ a Jinja filter templating failure due to bad type"""
+    pass
+
+
+class AnsiblePluginNotFound(AnsiblePluginError):
+    """ Indicates we did not find an Ansible plugin """
     pass

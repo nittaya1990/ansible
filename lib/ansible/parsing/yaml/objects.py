@@ -15,27 +15,22 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-import string
 import sys as _sys
 
-import sys
-import yaml
+from collections.abc import Sequence
 
-from ansible.module_utils.common._collections_compat import Sequence
 from ansible.module_utils.six import text_type
-from ansible.module_utils._text import to_bytes, to_text, to_native
+from ansible.module_utils.common.text.converters import to_bytes, to_text, to_native
 
 
 class AnsibleBaseYAMLObject(object):
-    '''
+    """
     the base class used to sub-class python built-in objects
     so that we can add attributes to them during yaml parsing
 
-    '''
+    """
     _data_source = None
     _line_number = 0
     _column_number = 0
@@ -59,22 +54,22 @@ class AnsibleBaseYAMLObject(object):
 
 
 class AnsibleMapping(AnsibleBaseYAMLObject, dict):
-    ''' sub class for dictionaries '''
+    """ sub class for dictionaries """
     pass
 
 
 class AnsibleUnicode(AnsibleBaseYAMLObject, text_type):
-    ''' sub class for unicode objects '''
+    """ sub class for unicode objects """
     pass
 
 
 class AnsibleSequence(AnsibleBaseYAMLObject, list):
-    ''' sub class for lists '''
+    """ sub class for lists """
     pass
 
 
 class AnsibleVaultEncryptedUnicode(Sequence, AnsibleBaseYAMLObject):
-    '''Unicode like object that is not evaluated (decrypted) until it needs to be'''
+    """Unicode like object that is not evaluated (decrypted) until it needs to be"""
     __UNSAFE__ = True
     __ENCRYPTED__ = True
     yaml_tag = u'!vault'
@@ -90,13 +85,13 @@ class AnsibleVaultEncryptedUnicode(Sequence, AnsibleBaseYAMLObject):
         return avu
 
     def __init__(self, ciphertext):
-        '''A AnsibleUnicode with a Vault attribute that can decrypt it.
+        """A AnsibleUnicode with a Vault attribute that can decrypt it.
 
         ciphertext is a byte string (str on PY2, bytestring on PY3).
 
         The .data attribute is a property that returns the decrypted plaintext
         of the ciphertext as a PY2 unicode or PY3 string object.
-        '''
+        """
         super(AnsibleVaultEncryptedUnicode, self).__init__()
 
         # after construction, calling code has to set the .vault attribute to a vaultlib object
@@ -127,7 +122,7 @@ class AnsibleVaultEncryptedUnicode(Sequence, AnsibleBaseYAMLObject):
         return True
 
     def __reversed__(self):
-        # This gets inerhited from ``collections.Sequence`` which returns a generator
+        # This gets inherited from ``collections.Sequence`` which returns a generator
         # make this act more like the string implementation
         return to_text(self[::-1], errors='surrogate_or_strict')
 

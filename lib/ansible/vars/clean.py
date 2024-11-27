@@ -1,18 +1,16 @@
 # Copyright (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import os
 import re
 
+from collections.abc import MutableMapping, MutableSequence
+
 from ansible import constants as C
 from ansible.errors import AnsibleError
 from ansible.module_utils import six
-from ansible.module_utils._text import to_text
-from ansible.module_utils.common._collections_compat import MutableMapping, MutableSequence
 from ansible.plugins.loader import connection_loader
 from ansible.utils.display import Display
 
@@ -96,9 +94,9 @@ def strip_internal_keys(dirty, exceptions=None):
 
 
 def remove_internal_keys(data):
-    '''
+    """
     More nuanced version of strip_internal_keys
-    '''
+    """
     for key in list(data.keys()):
         if (key.startswith('_ansible_') and key != '_ansible_parsed') or key in C.INTERNAL_RESULT_KEYS:
             display.warning("Removed unexpected internal key in module return: %s = %s" % (key, data[key]))
@@ -116,7 +114,7 @@ def remove_internal_keys(data):
 
 
 def clean_facts(facts):
-    ''' remove facts that can override internal keys or otherwise deemed unsafe '''
+    """ remove facts that can override internal keys or otherwise deemed unsafe """
     data = module_response_deepcopy(facts)
 
     remove_keys = set()
@@ -152,20 +150,14 @@ def clean_facts(facts):
     # then we remove them (except for ssh host keys)
     for r_key in remove_keys:
         if not r_key.startswith('ansible_ssh_host_key_'):
-            try:
-                r_val = to_text(data[r_key])
-                if len(r_val) > 24:
-                    r_val = '%s ... %s' % (r_val[:13], r_val[-6:])
-            except Exception:
-                r_val = ' <failed to convert value to a string> '
-            display.warning("Removed restricted key from module data: %s = %s" % (r_key, r_val))
+            display.warning("Removed restricted key from module data: %s" % (r_key))
             del data[r_key]
 
     return strip_internal_keys(data)
 
 
 def namespace_facts(facts):
-    ''' return all facts inside 'ansible_facts' w/o an ansible_ prefix '''
+    """ return all facts inside 'ansible_facts' w/o an ansible_ prefix """
     deprefixed = {}
     for k in facts:
         if k.startswith('ansible_') and k not in ('ansible_local',):

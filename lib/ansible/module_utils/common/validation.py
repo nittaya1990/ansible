@@ -2,22 +2,22 @@
 # Copyright (c) 2019 Ansible Project
 # Simplified BSD License (see licenses/simplified_bsd.txt or https://opensource.org/licenses/BSD-2-Clause)
 
-from __future__ import absolute_import, division, print_function
-__metaclass__ = type
+from __future__ import annotations
 
+import decimal
+import json
 import os
 import re
 
 from ast import literal_eval
-from ansible.module_utils._text import to_native
-from ansible.module_utils.common._json_compat import json
+from ansible.module_utils.common.text.converters import to_native
 from ansible.module_utils.common.collections import is_iterable
 from ansible.module_utils.common.text.converters import jsonify
 from ansible.module_utils.common.text.formatters import human_to_bytes
+from ansible.module_utils.common.warnings import deprecate
 from ansible.module_utils.parsing.convert_bool import boolean
 from ansible.module_utils.six import (
     binary_type,
-    integer_types,
     string_types,
     text_type,
 )
@@ -40,6 +40,10 @@ def count_terms(terms, parameters):
 
 
 def safe_eval(value, locals=None, include_exceptions=False):
+    deprecate(
+        "The safe_eval function should not be used.",
+        version="2.21",
+    )
     # do not allow method calls to modules
     if not isinstance(value, string_types):
         # already templated to a datavaluestructure, perhaps?
@@ -181,7 +185,7 @@ def check_required_by(requirements, parameters, options_context=None):
     :kwarg options_context: List of strings of parent key names if ``requirements`` are
         in a sub spec.
 
-    :returns: Empty dictionary or raises :class:`TypeError` if the
+    :returns: Empty dictionary or raises :class:`TypeError` if the check fails.
     """
 
     result = {}
@@ -191,22 +195,15 @@ def check_required_by(requirements, parameters, options_context=None):
     for (key, value) in requirements.items():
         if key not in parameters or parameters[key] is None:
             continue
-        result[key] = []
         # Support strings (single-item lists)
         if isinstance(value, string_types):
             value = [value]
-        for required in value:
-            if required not in parameters or parameters[required] is None:
-                result[key].append(required)
 
-    if result:
-        for key, missing in result.items():
-            if len(missing) > 0:
-                msg = "missing parameter(s) required by '%s': %s" % (key, ', '.join(missing))
-                if options_context:
-                    msg = "{0} found in {1}".format(msg, " -> ".join(options_context))
-                raise TypeError(to_native(msg))
-
+        if missing := [required for required in value if required not in parameters or parameters[required] is None]:
+            msg = f"missing parameter(s) required by '{key}': {', '.join(missing)}"
+            if options_context:
+                msg = f"{msg} found in {' -> '.join(options_context)}"
+            raise TypeError(to_native(msg))
     return result
 
 
@@ -381,7 +378,7 @@ def check_type_str(value, allow_conversion=True, param=None, prefix=''):
     if isinstance(value, string_types):
         return value
 
-    if allow_conversion:
+    if allow_conversion and value is not None:
         return to_native(value, errors='surrogate_or_strict')
 
     msg = "'{0!r}' is not a string and conversion is not allowed".format(value)
@@ -416,7 +413,7 @@ def check_type_dict(value):
 
     Raises :class:`TypeError` if unable to convert to a dict
 
-    :arg value: Dict or string to convert to a dict. Accepts ``k1=v2, k2=v2``.
+    :arg value: Dict or string to convert to a dict. Accepts ``k1=v2, k2=v2`` or ``k1=v2 k2=v2``.
 
     :returns: value converted to a dictionary
     """
@@ -428,10 +425,14 @@ def check_type_dict(value):
             try:
                 return json.loads(value)
             except Exception:
-                (result, exc) = safe_eval(value, dict(), include_exceptions=True)
-                if exc is not None:
-                    raise TypeError('unable to evaluate string as dictionary')
-                return result
+                try:
+                    result = literal_eval(value)
+                except Exception:
+                    pass
+                else:
+                    if isinstance(result, dict):
+                        return result
+                raise TypeError('unable to evaluate string as dictionary')
         elif '=' in value:
             fields = []
             field_buffer = []
@@ -458,7 +459,11 @@ def check_type_dict(value):
             field = ''.join(field_buffer)
             if field:
                 fields.append(field)
-            return dict(x.split("=", 1) for x in fields)
+            try:
+                return dict(x.split("=", 1) for x in fields)
+            except ValueError:
+                # no "=" to split on: "k1=v1, k2"
+                raise TypeError('unable to evaluate string in the "key=value" format as dictionary')
         else:
             raise TypeError("dictionary requested, could not parse JSON or key=value")
 
@@ -494,16 +499,15 @@ def check_type_int(value):
 
     :return: int of given value
     """
-    if isinstance(value, integer_types):
-        return value
-
-    if isinstance(value, string_types):
+    if not isinstance(value, int):
         try:
-            return int(value)
-        except ValueError:
-            pass
-
-    raise TypeError('%s cannot be converted to an int' % type(value))
+            if (decimal_value := decimal.Decimal(value)) != (int_value := int(decimal_value)):
+                raise ValueError("Significant decimal part found")
+            else:
+                value = int_value
+        except (decimal.DecimalException, TypeError, ValueError) as e:
+            raise TypeError(f'"{value!r}" cannot be converted to an int') from e
+    return value
 
 
 def check_type_float(value):
@@ -515,16 +519,12 @@ def check_type_float(value):
 
     :returns: float of given value.
     """
-    if isinstance(value, float):
-        return value
-
-    if isinstance(value, (binary_type, text_type, int)):
+    if not isinstance(value, float):
         try:
-            return float(value)
-        except ValueError:
-            pass
-
-    raise TypeError('%s cannot be converted to a float' % type(value))
+            value = float(value)
+        except (TypeError, ValueError) as e:
+            raise TypeError(f'{type(value)} cannot be converted to a float')
+    return value
 
 
 def check_type_path(value,):
@@ -543,7 +543,7 @@ def check_type_raw(value):
 def check_type_bytes(value):
     """Convert a human-readable string value to bytes
 
-    Raises :class:`TypeError` if unable to covert the value
+    Raises :class:`TypeError` if unable to convert the value
     """
     try:
         return human_to_bytes(value)
@@ -556,7 +556,7 @@ def check_type_bits(value):
 
     Example: ``check_type_bits('1Mb')`` returns integer 1048576.
 
-    Raises :class:`TypeError` if unable to covert the value.
+    Raises :class:`TypeError` if unable to convert the value.
     """
     try:
         return human_to_bytes(value, isbits=True)
@@ -568,7 +568,7 @@ def check_type_jsonarg(value):
     """Return a jsonified string. Sometimes the controller turns a json string
     into a dict/list so transform it back into json here
 
-    Raises :class:`TypeError` if unable to covert the value
+    Raises :class:`TypeError` if unable to convert the value
 
     """
     if isinstance(value, (text_type, binary_type)):

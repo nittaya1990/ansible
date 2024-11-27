@@ -3,13 +3,11 @@
 # Simplified BSD License (see licenses/simplified_bsd.txt or https://opensource.org/licenses/BSD-2-Clause)
 """Test low-level utility functions from ``module_utils.common.collections``."""
 
-from __future__ import absolute_import, division, print_function
-__metaclass__ = type
+from __future__ import annotations
 
 import pytest
 
-from ansible.module_utils.six import Iterator
-from ansible.module_utils.common._collections_compat import Sequence
+from collections.abc import Sequence
 from ansible.module_utils.common.collections import ImmutableDict, is_iterable, is_sequence
 
 
@@ -25,16 +23,6 @@ class SeqStub:
 Sequence.register(SeqStub)
 
 
-class IteratorStub(Iterator):
-    def __next__(self):
-        raise StopIteration
-
-
-class IterableStub:
-    def __iter__(self):
-        return IteratorStub()
-
-
 class FakeAnsibleVaultEncryptedUnicode(Sequence):
     __ENCRYPTED__ = True
 
@@ -42,25 +30,23 @@ class FakeAnsibleVaultEncryptedUnicode(Sequence):
         self.data = data
 
     def __getitem__(self, index):
-        return self.data[index]
+        raise NotImplementedError()  # pragma: nocover
 
     def __len__(self):
-        return len(self.data)
+        raise NotImplementedError()  # pragma: nocover
 
 
 TEST_STRINGS = u'he', u'Україна', u'Česká republika'
 TEST_STRINGS = TEST_STRINGS + tuple(s.encode('utf-8') for s in TEST_STRINGS) + (FakeAnsibleVaultEncryptedUnicode(u'foo'),)
 
-TEST_ITEMS_NON_SEQUENCES = (
+TEST_ITEMS_NON_SEQUENCES: tuple = (
     {}, object(), frozenset(),
     4, 0.,
 ) + TEST_STRINGS
 
-TEST_ITEMS_SEQUENCES = (
+TEST_ITEMS_SEQUENCES: tuple = (
     [], (),
     SeqStub(),
-)
-TEST_ITEMS_SEQUENCES = TEST_ITEMS_SEQUENCES + (
     # Iterable effectively containing nested random data:
     TEST_ITEMS_NON_SEQUENCES,
 )
@@ -93,14 +79,14 @@ def test_sequence_string_types_without_strings(string_input):
 
 @pytest.mark.parametrize(
     'seq',
-    ([], (), {}, set(), frozenset(), IterableStub()),
+    ([], (), {}, set(), frozenset()),
 )
 def test_iterable_positive(seq):
     assert is_iterable(seq)
 
 
 @pytest.mark.parametrize(
-    'seq', (IteratorStub(), object(), 5, 9.)
+    'seq', (object(), 5, 9.)
 )
 def test_iterable_negative(seq):
     assert not is_iterable(seq)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import typing as t
 
 from .argparsing import (
     CompositeActionCompletionFinder,
@@ -13,23 +14,26 @@ from .commands import (
     do_commands,
 )
 
+from .epilog import (
+    get_epilog,
+)
 
 from .compat import (
     HostSettings,
     convert_legacy_args,
 )
 
+from ..util import (
+    get_ansible_version,
+)
 
-def parse_args():  # type: () -> argparse.Namespace
+
+def parse_args(argv: t.Optional[list[str]] = None) -> argparse.Namespace:
     """Parse command line arguments."""
     completer = CompositeActionCompletionFinder()
 
-    if completer.enabled:
-        epilog = 'Tab completion available using the "argcomplete" python package.'
-    else:
-        epilog = 'Install the "argcomplete" python package to enable tab completion.'
-
-    parser = argparse.ArgumentParser(epilog=epilog)
+    parser = argparse.ArgumentParser(prog='ansible-test', epilog=get_epilog(completer), formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--version', action='version', version=f'%(prog)s version {get_ansible_version()}')
 
     do_commands(parser, completer)
 
@@ -38,7 +42,11 @@ def parse_args():  # type: () -> argparse.Namespace
         always_complete_options=False,
     )
 
-    argv = sys.argv[1:]
+    if argv is None:
+        argv = sys.argv[1:]
+    else:
+        argv = argv[1:]
+
     args = parser.parse_args(argv)
 
     if args.explain and not args.verbosity:

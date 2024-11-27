@@ -1,10 +1,9 @@
 # (c) 2014, Brian Coca, Josh Drake, et al
 # (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
     cache: redis
     short_description: Use Redis DB for cache
     description:
@@ -38,7 +37,7 @@ DOCUMENTATION = '''
           - key: fact_caching_timeout
             section: defaults
         type: integer
-'''
+"""
 
 import time
 import json

@@ -1,26 +1,26 @@
 # Copyright: (c) 2021, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import os
 import subprocess
 import sys
+import typing as t
 
-from ansible.module_utils.common.text.converters import to_bytes, to_native
+from ansible.module_utils.common.text.converters import to_bytes
 
 
 def has_respawned():
     return hasattr(sys.modules['__main__'], '_respawned')
 
 
-def respawn_module(interpreter_path):
+def respawn_module(interpreter_path) -> t.NoReturn:
     """
     Respawn the currently-running Ansible Python module under the specified Python interpreter.
 
     Ansible modules that require libraries that are typically available only under well-known interpreters
-    (eg, ``yum``, ``apt``, ``dnf``) can use bespoke logic to determine the libraries they need are not
+    (eg, ``apt``, ``dnf``) can use bespoke logic to determine the libraries they need are not
     available, then call `respawn_module` to re-execute the current module under a different interpreter
     and exit the current process when the new subprocess has completed. The respawned process inherits only
     stdout/stderr from the current process.
@@ -75,14 +75,13 @@ def _create_payload():
         raise Exception('unable to access ansible.module_utils.basic._ANSIBLE_ARGS (not launched by AnsiballZ?)')
     module_fqn = sys.modules['__main__']._module_fqn
     modlib_path = sys.modules['__main__']._modlib_path
-    respawn_code_template = '''
+    respawn_code_template = """
 import runpy
 import sys
 
-module_fqn = '{module_fqn}'
-modlib_path = '{modlib_path}'
-smuggled_args = b"""{smuggled_args}""".strip()
-
+module_fqn = {module_fqn!r}
+modlib_path = {modlib_path!r}
+smuggled_args = {smuggled_args!r}
 
 if __name__ == '__main__':
     sys.path.insert(0, modlib_path)
@@ -91,8 +90,8 @@ if __name__ == '__main__':
     basic._ANSIBLE_ARGS = smuggled_args
 
     runpy.run_module(module_fqn, init_globals=dict(_respawned=True), run_name='__main__', alter_sys=True)
-    '''
+    """
 
-    respawn_code = respawn_code_template.format(module_fqn=module_fqn, modlib_path=modlib_path, smuggled_args=to_native(smuggled_args))
+    respawn_code = respawn_code_template.format(module_fqn=module_fqn, modlib_path=modlib_path, smuggled_args=smuggled_args.strip())
 
     return respawn_code

@@ -1,13 +1,11 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import absolute_import, division, print_function
-__metaclass__ = type
+from __future__ import annotations
 
 
-DOCUMENTATION = r'''
+DOCUMENTATION = r"""
 ---
 author: Allen Sanabria (@linuxdynasty)
 module: include_vars
@@ -23,25 +21,25 @@ options:
   file:
     description:
       - The file name from which variables should be loaded.
-      - If the path is relative, it will look for the file in vars/ subdirectory of a role or relative to playbook.
+      - If the path is relative, it will look for the file in C(vars/) subdirectory of a role or relative to playbook.
     type: path
     version_added: "2.2"
   dir:
     description:
       - The directory name from which the variables should be loaded.
-      - If the path is relative and the task is inside a role, it will look inside the role's vars/ subdirectory.
+      - If the path is relative and the task is inside a role, it will look inside the role's C(vars/) subdirectory.
       - If the path is relative and not inside a role, it will be parsed relative to the playbook.
     type: path
     version_added: "2.2"
   name:
     description:
       - The name of a variable into which assign the included vars.
-      - If omitted (null) they will be made top level vars.
+      - If omitted (V(null)) they will be made top level vars.
     type: str
     version_added: "2.2"
   depth:
     description:
-      - When using C(dir), this module will, by default, recursively go through each sub directory and load up the
+      - When using O(dir), this module will, by default, recursively go through each sub directory and load up the
         variables. By explicitly setting the depth, this module will only go as deep as the depth.
     type: int
     default: 0
@@ -55,11 +53,13 @@ options:
     description:
       - List of file names to ignore.
     type: list
+    elements: str
     version_added: "2.2"
   extensions:
     description:
-      - List of file extensions to read when using C(dir).
+      - List of file extensions to read when using O(dir).
     type: list
+    elements: str
     default: [ json, yaml, yml ]
     version_added: "2.3"
   ignore_unknown_extensions:
@@ -72,16 +72,17 @@ options:
     version_added: "2.7"
   hash_behaviour:
     description:
-      - If set to C(merge), merges existing hash variables instead of overwriting them.
-      - If omitted C(null), the behavior falls back to the global I(hash_behaviour) configuration.
+      - If set to V(merge), merges existing hash variables instead of overwriting them.
+      - If omitted (V(null)), the behavior falls back to the global C(hash_behaviour) configuration.
+      - This option is self-contained and does not apply to individual files in O(dir). You can use a loop to apply O(hash_behaviour) per file.
     default: null
     type: str
     choices: ["replace", "merge"]
     version_added: "2.12"
   free-form:
     description:
-      - This module allows you to specify the 'file' option directly without any other options.
-      - There is no 'free-form' option, this is just an indicator, see example below.
+      - This module allows you to specify the O(file) option directly without any other options.
+      - There is no O(ignore:free-form) option, this is just an indicator, see example below.
 extends_documentation_fragment:
     - action_common_attributes
     - action_common_attributes.conn
@@ -89,7 +90,7 @@ extends_documentation_fragment:
     - action_core
 attributes:
     action:
-        details: While the action plugin does do some of the work it relies on the core engine to actually create the variables, that part cannot be overriden
+        details: While the action plugin does do some of the work it relies on the core engine to actually create the variables, that part cannot be overridden
         support: partial
     bypass_host_loop:
         support: none
@@ -99,7 +100,7 @@ attributes:
         support: full
     delegation:
         details:
-            - while variable assignment can be delegated to a different host the execution context is always the current invenotory_hostname
+            - while variable assignment can be delegated to a different host the execution context is always the current inventory_hostname
             - connection variables, if set at all, would reflect the host it would target, even if we are not connecting at all in this case
         support: partial
     diff_mode:
@@ -111,22 +112,22 @@ seealso:
 - module: ansible.builtin.set_fact
 - ref: playbooks_delegation
   description: More information related to task delegation.
-'''
+"""
 
-EXAMPLES = r'''
+EXAMPLES = r"""
 - name: Include vars of stuff.yaml into the 'stuff' variable (2.2).
-  include_vars:
+  ansible.builtin.include_vars:
     file: stuff.yaml
     name: stuff
 
 - name: Conditionally decide to load in variables into 'plans' when x is 0, otherwise do not. (2.2)
-  include_vars:
+  ansible.builtin.include_vars:
     file: contingency_plan.yaml
     name: plans
   when: x == 0
 
 - name: Load a variable file based on the OS type, or a default if not found. Using free-form to specify the file.
-  include_vars: "{{ lookup('first_found', params) }}"
+  ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
   vars:
     params:
       files:
@@ -137,32 +138,32 @@ EXAMPLES = r'''
         - 'vars'
 
 - name: Bare include (free-form)
-  include_vars: myvars.yaml
+  ansible.builtin.include_vars: myvars.yaml
 
 - name: Include all .json and .jsn files in vars/all and all nested directories (2.3)
-  include_vars:
+  ansible.builtin.include_vars:
     dir: vars/all
     extensions:
       - 'json'
       - 'jsn'
 
 - name: Include all default extension files in vars/all and all nested directories and save the output in test. (2.2)
-  include_vars:
+  ansible.builtin.include_vars:
     dir: vars/all
     name: test
 
 - name: Include default extension files in vars/services (2.2)
-  include_vars:
+  ansible.builtin.include_vars:
     dir: vars/services
     depth: 1
 
 - name: Include only files matching bastion.yaml (2.2)
-  include_vars:
+  ansible.builtin.include_vars:
     dir: vars
     files_matching: bastion.yaml
 
 - name: Include all .yaml files except bastion.yaml (2.3)
-  include_vars:
+  ansible.builtin.include_vars:
     dir: vars
     ignore_files:
       - 'bastion.yaml'
@@ -170,7 +171,7 @@ EXAMPLES = r'''
       - 'yaml'
 
 - name: Ignore warnings raised for files with unknown extensions while loading (2.7)
-  include_vars:
+  ansible.builtin.include_vars:
     dir: vars
     ignore_unknown_extensions: True
     extensions:
@@ -178,9 +179,9 @@ EXAMPLES = r'''
       - 'yaml'
       - 'yml'
       - 'json'
-'''
+"""
 
-RETURN = r'''
+RETURN = r"""
 ansible_facts:
   description: Variables that were included and their values
   returned: success
@@ -192,4 +193,4 @@ ansible_included_var_files:
   type: list
   sample: [ /path/to/file.json, /path/to/file.yaml ]
   version_added: '2.4'
-'''
+"""

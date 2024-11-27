@@ -18,17 +18,20 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 ########################################################################
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import base64
-import os
 import json
+import os
+import time
 from stat import S_IRUSR, S_IWUSR
+from urllib.error import HTTPError
 
 from ansible import constants as C
+from ansible.galaxy.api import GalaxyError
 from ansible.galaxy.user_agent import user_agent
-from ansible.module_utils._text import to_bytes, to_native, to_text
+from ansible.module_utils.common.sentinel import Sentinel as NoTokenSentinel
+from ansible.module_utils.common.text.converters import to_bytes, to_native, to_text
 from ansible.module_utils.common.yaml import yaml_dump, yaml_load
 from ansible.module_utils.urls import open_url
 from ansible.utils.display import Display
@@ -36,17 +39,11 @@ from ansible.utils.display import Display
 display = Display()
 
 
-class NoTokenSentinel(object):
-    """ Represents an ansible.cfg server with not token defined (will ignore cmdline and GALAXY_TOKEN_PATH. """
-    def __new__(cls, *args, **kwargs):
-        return cls
-
-
 class KeycloakToken(object):
-    '''A token granted by a Keycloak server.
+    """A token granted by a Keycloak server.
 
     Like sso.redhat.com as used by cloud.redhat.com
-    ie Automation Hub'''
+    ie Automation Hub"""
 
     token_type = 'Bearer'
 
@@ -58,18 +55,22 @@ class KeycloakToken(object):
         self.client_id = client_id
         if self.client_id is None:
             self.client_id = 'cloud-services'
+        self._expiration = None
 
     def _form_payload(self):
         return 'grant_type=refresh_token&client_id=%s&refresh_token=%s' % (self.client_id,
                                                                            self.access_token)
 
     def get(self):
+        if self._expiration and time.time() >= self._expiration:
+            self._token = None
+
         if self._token:
             return self._token
 
         # - build a request to POST to auth_url
         #  - body is form encoded
-        #    - 'request_token' is the offline token stored in ansible.cfg
+        #    - 'refresh_token' is the offline token stored in ansible.cfg
         #    - 'grant_type' is 'refresh_token'
         #    - 'client_id' is 'cloud-services'
         #       - should probably be based on the contents of the
@@ -77,15 +78,20 @@ class KeycloakToken(object):
         #         or 'azp' (Authorized party - the party to which the ID Token was issued)
         payload = self._form_payload()
 
-        resp = open_url(to_native(self.auth_url),
-                        data=payload,
-                        validate_certs=self.validate_certs,
-                        method='POST',
-                        http_agent=user_agent())
+        try:
+            resp = open_url(to_native(self.auth_url),
+                            data=payload,
+                            validate_certs=self.validate_certs,
+                            method='POST',
+                            http_agent=user_agent())
+        except HTTPError as e:
+            raise GalaxyError(e, 'Unable to get access token')
 
-        # TODO: handle auth errors
+        data = json.load(resp)
 
-        data = json.loads(to_text(resp.read(), errors='surrogate_or_strict'))
+        # So that we have a buffer, expire the token in ~2/3 the given value
+        expires_in = data['expires_in'] // 3 * 2
+        self._expiration = time.time() + expires_in
 
         # - extract 'access_token'
         self._token = data.get('access_token')
@@ -99,7 +105,7 @@ class KeycloakToken(object):
 
 
 class GalaxyToken(object):
-    ''' Class to storing and retrieving local galaxy token '''
+    """ Class to storing and retrieving local galaxy token """
 
     token_type = 'Token'
 

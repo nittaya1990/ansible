@@ -14,8 +14,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 
 from ansible.errors import AnsibleAction, AnsibleActionFail
@@ -36,7 +35,7 @@ class ActionModule(ActionBase):
     BUILTIN_SVC_MGR_MODULES = set(['openwrt_init', 'service', 'systemd', 'sysvinit'])
 
     def run(self, tmp=None, task_vars=None):
-        ''' handler for package operations '''
+        """ handler for package operations """
 
         self._supports_check_mode = True
         self._supports_async = True

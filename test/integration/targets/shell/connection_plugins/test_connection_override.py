@@ -1,10 +1,9 @@
 # Copyright (c) 2019 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
 connection: test_connection_override
 short_description: test connection plugin used in tests
 description:
@@ -12,13 +11,13 @@ description:
 author: ansible (@core)
 version_added: historical
 options:
-'''
+"""
 
 from ansible.plugins.connection import ConnectionBase
 
 
 class Connection(ConnectionBase):
-    ''' test connection '''
+    """ test connection """
 
     transport = 'test_connection_override'
 

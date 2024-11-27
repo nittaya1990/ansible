@@ -1,10 +1,9 @@
 # Copyright (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
     name: generator
     version_added: "2.6"
     short_description: Uses Jinja2 to construct hosts and groups from patterns
@@ -17,7 +16,7 @@ DOCUMENTATION = '''
       plugin:
          description: token that ensures this is a source file for the 'generator' plugin.
          required: True
-         choices: ['generator']
+         choices: ['ansible.builtin.generator', 'generator']
       hosts:
         description:
           - The C(name) key is a template used to generate
@@ -33,13 +32,13 @@ DOCUMENTATION = '''
         description:
           - A dictionary of layers, with the key being the layer name, used as a variable name in the C(host)
             C(name) and C(parents) keys. Each layer value is a list of possible values for that layer.
-'''
+"""
 
-EXAMPLES = '''
+EXAMPLES = """
     # inventory.config file in YAML format
     # remember to enable this inventory plugin in the ansible.cfg before using
     # View the output using `ansible-inventory -i inventory.config --list`
-    plugin: generator
+    plugin: ansible.builtin.generator
     hosts:
         name: "{{ operation }}_{{ application }}_{{ environment }}_runner"
         parents:
@@ -69,7 +68,7 @@ EXAMPLES = '''
         application:
             - web
             - api
-'''
+"""
 
 import os
 
@@ -119,7 +118,7 @@ class InventoryModule(BaseInventoryPlugin):
             self.add_parents(inventory, groupname, parent.get('parents', []), template_vars)
 
     def parse(self, inventory, loader, path, cache=False):
-        ''' parses the inventory file '''
+        """ parses the inventory file """
 
         super(InventoryModule, self).parse(inventory, loader, path, cache=cache)
 

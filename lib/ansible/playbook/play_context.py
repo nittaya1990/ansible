@@ -17,24 +17,13 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
-
-import os
-import sys
+from __future__ import annotations
 
 from ansible import constants as C
 from ansible import context
-from ansible.errors import AnsibleError
-from ansible.module_utils.compat.paramiko import paramiko
-from ansible.module_utils.six import iteritems
 from ansible.playbook.attribute import FieldAttribute
 from ansible.playbook.base import Base
-from ansible.plugins import get_plugin_class
 from ansible.utils.display import Display
-from ansible.plugins.loader import get_shell_plugin
-from ansible.utils.ssh_functions import check_for_controlpersist
 
 
 display = Display()
@@ -76,54 +65,53 @@ RESET_VARS = (
 
 class PlayContext(Base):
 
-    '''
+    """
     This class is used to consolidate the connection information for
     hosts in a play and child tasks, where the task may override some
     connection/authentication information.
-    '''
+    """
 
     # base
-    _module_compression = FieldAttribute(isa='string', default=C.DEFAULT_MODULE_COMPRESSION)
-    _shell = FieldAttribute(isa='string')
-    _executable = FieldAttribute(isa='string', default=C.DEFAULT_EXECUTABLE)
+    module_compression = FieldAttribute(isa='string', default=C.DEFAULT_MODULE_COMPRESSION)
+    shell = FieldAttribute(isa='string')
+    executable = FieldAttribute(isa='string', default=C.DEFAULT_EXECUTABLE)
 
     # connection fields, some are inherited from Base:
     # (connection, port, remote_user, environment, no_log)
-    _remote_addr = FieldAttribute(isa='string')
-    _password = FieldAttribute(isa='string')
-    _timeout = FieldAttribute(isa='int', default=C.DEFAULT_TIMEOUT)
-    _connection_user = FieldAttribute(isa='string')
-    _private_key_file = FieldAttribute(isa='string', default=C.DEFAULT_PRIVATE_KEY_FILE)
-    _pipelining = FieldAttribute(isa='bool', default=C.ANSIBLE_PIPELINING)
+    remote_addr = FieldAttribute(isa='string')
+    password = FieldAttribute(isa='string')
+    timeout = FieldAttribute(isa='int', default=C.DEFAULT_TIMEOUT)
+    connection_user = FieldAttribute(isa='string')
+    private_key_file = FieldAttribute(isa='string', default=C.DEFAULT_PRIVATE_KEY_FILE)
+    pipelining = FieldAttribute(isa='bool', default=C.ANSIBLE_PIPELINING)
 
     # networking modules
-    _network_os = FieldAttribute(isa='string')
+    network_os = FieldAttribute(isa='string')
 
     # docker FIXME: remove these
-    _docker_extra_args = FieldAttribute(isa='string')
+    docker_extra_args = FieldAttribute(isa='string')
 
     # ???
-    _connection_lockfd = FieldAttribute(isa='int')
+    connection_lockfd = FieldAttribute(isa='int')
 
     # privilege escalation fields
-    _become = FieldAttribute(isa='bool')
-    _become_method = FieldAttribute(isa='string')
-    _become_user = FieldAttribute(isa='string')
-    _become_pass = FieldAttribute(isa='string')
-    _become_exe = FieldAttribute(isa='string', default=C.DEFAULT_BECOME_EXE)
-    _become_flags = FieldAttribute(isa='string', default=C.DEFAULT_BECOME_FLAGS)
-    _prompt = FieldAttribute(isa='string')
+    become = FieldAttribute(isa='bool')
+    become_method = FieldAttribute(isa='string')
+    become_user = FieldAttribute(isa='string')
+    become_pass = FieldAttribute(isa='string')
+    become_exe = FieldAttribute(isa='string', default=C.DEFAULT_BECOME_EXE)
+    become_flags = FieldAttribute(isa='string', default=C.DEFAULT_BECOME_FLAGS)
+    prompt = FieldAttribute(isa='string')
 
     # general flags
-    _verbosity = FieldAttribute(isa='int', default=0)
-    _only_tags = FieldAttribute(isa='set', default=set)
-    _skip_tags = FieldAttribute(isa='set', default=set)
+    only_tags = FieldAttribute(isa='set', default=set)
+    skip_tags = FieldAttribute(isa='set', default=set)
 
-    _start_at_task = FieldAttribute(isa='string')
-    _step = FieldAttribute(isa='bool', default=False)
+    start_at_task = FieldAttribute(isa='string')
+    step = FieldAttribute(isa='bool', default=False)
 
     # "PlayContext.force_handlers should not be used, the calling code should be using play itself instead"
-    _force_handlers = FieldAttribute(isa='bool', default=False)
+    force_handlers = FieldAttribute(isa='bool', default=False)
 
     def __init__(self, play=None, passwords=None, connection_lockfd=None):
         # Note: play is really not optional.  The only time it could be omitted is when we create
@@ -149,6 +137,8 @@ class PlayContext(Base):
         # set options before play to allow play to override them
         if context.CLIARGS:
             self.set_attributes_from_cli()
+        else:
+            self._internal_verbosity = 0
 
         if play:
             self.set_attributes_from_play(play)
@@ -157,7 +147,7 @@ class PlayContext(Base):
         # generic derived from connection plugin, temporary for backwards compat, in the end we should not set play_context properties
 
         # get options for plugins
-        options = C.config.get_configuration_definitions(get_plugin_class(plugin), plugin._load_name)
+        options = C.config.get_configuration_definitions(plugin.plugin_type, plugin._load_name)
         for option in options:
             if option:
                 flag = options[option].get('name')
@@ -168,31 +158,31 @@ class PlayContext(Base):
         self.force_handlers = play.force_handlers
 
     def set_attributes_from_cli(self):
-        '''
+        """
         Configures this connection information instance with data from
         options specified by the user on the command line. These have a
         lower precedence than those set on the play or host.
-        '''
+        """
         if context.CLIARGS.get('timeout', False):
             self.timeout = int(context.CLIARGS['timeout'])
 
         # From the command line.  These should probably be used directly by plugins instead
         # For now, they are likely to be moved to FieldAttribute defaults
         self.private_key_file = context.CLIARGS.get('private_key_file')  # Else default
-        self.verbosity = context.CLIARGS.get('verbosity')  # Else default
+        self._internal_verbosity = context.CLIARGS.get('verbosity')  # Else default
 
         # Not every cli that uses PlayContext has these command line args so have a default
         self.start_at_task = context.CLIARGS.get('start_at_task', None)  # Else default
 
     def set_task_and_variable_override(self, task, variables, templar):
-        '''
+        """
         Sets attributes from the task if they are set, which will override
         those from the play.
 
         :arg task: the task object with the parameters that were set on it
         :arg variables: variables from inventory
         :arg templar: templar instance if templating variables is needed
-        '''
+        """
 
         new_info = self.copy()
 
@@ -257,7 +247,7 @@ class PlayContext(Base):
                     setattr(new_info, 'executable', variables.get(exe_var))
 
         attrs_considered = []
-        for (attr, variable_names) in iteritems(C.MAGIC_VARIABLE_MAPPING):
+        for (attr, variable_names) in C.MAGIC_VARIABLE_MAPPING.items():
             for variable_name in variable_names:
                 if attr in attrs_considered:
                     continue
@@ -303,9 +293,12 @@ class PlayContext(Base):
             if not new_info.connection_user:
                 new_info.connection_user = new_info.remote_user
 
-        # set no_log to default if it was not previously set
-        if new_info.no_log is None:
-            new_info.no_log = C.DEFAULT_NO_LOG
+        # for case in which connection plugin still uses pc.remote_addr and in it's own options
+        # specifies 'default: inventory_hostname', but never added to vars:
+        if new_info.remote_addr == 'inventory_hostname':
+            new_info.remote_addr = variables.get('inventory_hostname')
+            display.warning('The "%s" connection plugin has an improperly configured remote target value, '
+                            'forcing "inventory_hostname" templated value instead of the string' % new_info.connection)
 
         if task.check_mode is not None:
             new_info.check_mode = task.check_mode
@@ -319,10 +312,10 @@ class PlayContext(Base):
         self._become_plugin = plugin
 
     def update_vars(self, variables):
-        '''
+        """
         Adds 'magic' variables relating to connections to the variable dictionary provided.
         In case users need to access from the play, this is a legacy from runner.
-        '''
+        """
 
         for prop, var_list in C.MAGIC_VARIABLE_MAPPING.items():
             try:
@@ -335,21 +328,3 @@ class PlayContext(Base):
                         variables[var_opt] = var_val
             except AttributeError:
                 continue
-
-    def _get_attr_connection(self):
-        ''' connections are special, this takes care of responding correctly '''
-        conn_type = None
-        if self._attributes['connection'] == 'smart':
-            conn_type = 'ssh'
-            # see if SSH can support ControlPersist if not use paramiko
-            if not check_for_controlpersist('ssh') and paramiko is not None:
-                conn_type = "paramiko"
-
-        # if someone did `connection: persistent`, default it to using a persistent paramiko connection to avoid problems
-        elif self._attributes['connection'] == 'persistent' and paramiko is not None:
-            conn_type = 'paramiko'
-
-        if conn_type:
-            self.connection = conn_type
-
-        return self._attributes['connection']

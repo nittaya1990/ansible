@@ -15,10 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-from units.compat import unittest
+import unittest
 
 from ansible.inventory.group import Group
 from ansible.inventory.host import Host
@@ -143,10 +142,10 @@ class TestGroup(unittest.TestCase):
         )
 
     def test_ancestors_recursive_loop_safe(self):
-        '''
+        """
         The get_ancestors method may be referenced before circular parenting
         checks, so the method is expected to be stable even with loops
-        '''
+        """
         A = Group('A')
         B = Group('B')
         A.parent_groups.append(B)

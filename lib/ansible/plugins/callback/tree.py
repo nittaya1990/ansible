@@ -2,10 +2,9 @@
 # (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
     name: tree
     type: notification
     requirements:
@@ -15,7 +14,7 @@ DOCUMENTATION = '''
     options:
         directory:
             version_added: '2.11'
-            description: directory that will contain the per host JSON files. Also set by the ``--tree`` option when using adhoc.
+            description: directory that will contain the per host JSON files. Also set by the C(--tree) option when using adhoc.
             ini:
                 - section: callback_tree
                   key: directory
@@ -24,22 +23,22 @@ DOCUMENTATION = '''
             default: "~/.ansible/tree"
             type: path
     description:
-        - "This callback is used by the Ansible (adhoc) command line option `-t|--tree`"
+        - "This callback is used by the Ansible (adhoc) command line option C(-t|--tree)."
         - This produces a JSON dump of events in a directory, a file for each host, the directory used MUST be passed as a command line option.
-'''
+"""
 
 import os
 
 from ansible.constants import TREE_DIR
-from ansible.module_utils._text import to_bytes, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_text
 from ansible.plugins.callback import CallbackBase
 from ansible.utils.path import makedirs_safe, unfrackpath
 
 
 class CallbackModule(CallbackBase):
-    '''
+    """
     This callback puts results into a host specific file in a directory in json format.
-    '''
+    """
 
     CALLBACK_VERSION = 2.0
     CALLBACK_TYPE = 'aggregate'
@@ -47,18 +46,18 @@ class CallbackModule(CallbackBase):
     CALLBACK_NEEDS_ENABLED = True
 
     def set_options(self, task_keys=None, var_options=None, direct=None):
-        ''' override to set self.tree '''
+        """ override to set self.tree """
 
         super(CallbackModule, self).set_options(task_keys=task_keys, var_options=var_options, direct=direct)
 
         if TREE_DIR:
-            # TREE_DIR comes from the CLI option --tree, only avialable for adhoc
+            # TREE_DIR comes from the CLI option --tree, only available for adhoc
             self.tree = unfrackpath(TREE_DIR)
         else:
             self.tree = self.get_option('directory')
 
     def write_tree_file(self, hostname, buf):
-        ''' write something into treedir/hostname '''
+        """ write something into treedir/hostname """
 
         buf = to_bytes(buf)
         try:

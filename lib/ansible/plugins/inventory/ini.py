@@ -1,35 +1,35 @@
 # Copyright (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
     name: ini
     version_added: "2.4"
     short_description: Uses an Ansible INI file as inventory source.
     description:
-        - INI file based inventory, sections are groups or group related with special `:modifiers`.
+        - INI file based inventory, sections are groups or group related with special C(:modifiers).
         - Entries in sections C([group_1]) are hosts, members of the group.
         - Hosts can have variables defined inline as key/value pairs separated by C(=).
         - The C(children) modifier indicates that the section contains groups.
         - The C(vars) modifier indicates that the section contains variables assigned to members of the group.
         - Anything found outside a section is considered an 'ungrouped' host.
-        - Values passed in the INI format using the ``key=value`` syntax are interpreted differently depending on where they are declared within your inventory.
+        - Values passed in the INI format using the C(key=value) syntax are interpreted differently depending on where they are declared within your inventory.
         - When declared inline with the host, INI values are processed by Python's ast.literal_eval function
           (U(https://docs.python.org/3/library/ast.html#ast.literal_eval)) and interpreted as Python literal structures
-          (strings, numbers, tuples, lists, dicts, booleans, None). Host lines accept multiple C(key=value) parameters per line.
+         (strings, numbers, tuples, lists, dicts, booleans, None). If you want a number to be treated as a string, you must quote it.
+          Host lines accept multiple C(key=value) parameters per line.
           Therefore they need a way to indicate that a space is part of a value rather than a separator.
         - When declared in a C(:vars) section, INI values are interpreted as strings. For example C(var=FALSE) would create a string equal to C(FALSE).
           Unlike host lines, C(:vars) sections accept only a single entry per line, so everything after the C(=) must be the value for the entry.
         - Do not rely on types set during definition, always make sure you specify type with a filter when needed when consuming the variable.
         - See the Examples for proper quoting to prevent changes to variable type.
     notes:
-        - Whitelisted in configuration by default.
+        - Enabled in configuration by default.
         - Consider switching to YAML format for inventory sources to avoid confusion on the actual type of a variable.
           The YAML inventory plugin processes variable values consistently and correctly.
-'''
+"""
 
-EXAMPLES = '''# fmt: ini
+EXAMPLES = """# fmt: ini
 # Example 1
 [web]
 host1
@@ -70,16 +70,17 @@ host4
 [g2]
 host4 # same host as above, but member of 2 groups, will inherit vars from both
       # inventory hostnames are unique
-'''
+"""
 
 import ast
 import re
+import warnings
 
 from ansible.inventory.group import to_safe_group_name
 from ansible.plugins.inventory import BaseFileInventoryPlugin
 
 from ansible.errors import AnsibleError, AnsibleParserError
-from ansible.module_utils._text import to_bytes, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_text
 from ansible.utils.shlex import shlex_split
 
 
@@ -139,10 +140,10 @@ class InventoryModule(BaseFileInventoryPlugin):
         raise AnsibleError("%s:%d: " % (self._filename, self.lineno) + message)
 
     def _parse(self, path, lines):
-        '''
+        """
         Populates self.groups from the given array of lines. Raises an error on
         any parse failure.
-        '''
+        """
 
         self._compile_patterns()
 
@@ -254,10 +255,10 @@ class InventoryModule(BaseFileInventoryPlugin):
         del pending[group]
 
     def _parse_group_name(self, line):
-        '''
+        """
         Takes a single line and tries to parse it as a group name. Returns the
         group name if successful, or raises an error.
-        '''
+        """
 
         m = self.patterns['groupname'].match(line)
         if m:
@@ -266,10 +267,10 @@ class InventoryModule(BaseFileInventoryPlugin):
         self._raise_error("Expected group name, got: %s" % (line))
 
     def _parse_variable_definition(self, line):
-        '''
+        """
         Takes a string and tries to parse it as a variable definition. Returns
         the key and value if successful, or raises an error.
-        '''
+        """
 
         # TODO: We parse variable assignments as a key (anything to the left of
         # an '='"), an '=', and a value (anything left) and leave the value to
@@ -283,10 +284,10 @@ class InventoryModule(BaseFileInventoryPlugin):
         self._raise_error("Expected key=value, got: %s" % (line))
 
     def _parse_host_definition(self, line):
-        '''
+        """
         Takes a single line and tries to parse it as a host definition. Returns
         a list of Hosts if successful, or raises an error.
-        '''
+        """
 
         # A host definition comprises (1) a non-whitespace hostname or range,
         # optionally followed by (2) a series of key="some value" assignments.
@@ -316,9 +317,9 @@ class InventoryModule(BaseFileInventoryPlugin):
         return hostnames, port, variables
 
     def _expand_hostpattern(self, hostpattern):
-        '''
+        """
         do some extra checks over normal processing
-        '''
+        """
         # specification?
 
         hostnames, port = super(InventoryModule, self)._expand_hostpattern(hostpattern)
@@ -335,14 +336,16 @@ class InventoryModule(BaseFileInventoryPlugin):
 
     @staticmethod
     def _parse_value(v):
-        '''
+        """
         Attempt to transform the string value from an ini file into a basic python object
         (int, dict, list, unicode string, etc).
-        '''
+        """
         try:
-            v = ast.literal_eval(v)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                v = ast.literal_eval(v)
         # Using explicit exceptions.
-        # Likely a string that literal_eval does not like. We wil then just set it.
+        # Likely a string that literal_eval does not like. We will then just set it.
         except ValueError:
             # For some reason this was thought to be malformed.
             pass
@@ -352,10 +355,10 @@ class InventoryModule(BaseFileInventoryPlugin):
         return to_text(v, nonstring='passthru', errors='surrogate_or_strict')
 
     def _compile_patterns(self):
-        '''
+        """
         Compiles the regular expressions required to parse the inventory and
         stores them in self.patterns.
-        '''
+        """
 
         # Section names are square-bracketed expressions at the beginning of a
         # line, comprising (1) a group name optionally followed by (2) a tag
@@ -367,14 +370,14 @@ class InventoryModule(BaseFileInventoryPlugin):
         # [naughty:children] # only get coal in their stockings
 
         self.patterns['section'] = re.compile(
-            to_text(r'''^\[
+            to_text(r"""^\[
                     ([^:\]\s]+)             # group name (see groupname below)
                     (?::(\w+))?             # optional : and tag name
                 \]
                 \s*                         # ignore trailing whitespace
                 (?:\#.*)?                   # and/or a comment till the
                 $                           # end of the line
-            ''', errors='surrogate_or_strict'), re.X
+            """, errors='surrogate_or_strict'), re.X
         )
 
         # FIXME: What are the real restrictions on group names, or rather, what
@@ -383,10 +386,10 @@ class InventoryModule(BaseFileInventoryPlugin):
         # precise rules in order to support better diagnostics.
 
         self.patterns['groupname'] = re.compile(
-            to_text(r'''^
+            to_text(r"""^
                 ([^:\]\s]+)
                 \s*                         # ignore trailing whitespace
                 (?:\#.*)?                   # and/or a comment till the
                 $                           # end of the line
-            ''', errors='surrogate_or_strict'), re.X
+            """, errors='surrogate_or_strict'), re.X
         )

@@ -2,13 +2,7 @@
 from __future__ import annotations
 
 import configparser
-import os
-import urllib.parse
 import typing as t
-
-from ....io import (
-    read_text_file,
-)
 
 from ....util import (
     ApplicationError,
@@ -23,12 +17,9 @@ from ....target import (
     IntegrationTarget,
 )
 
-from ....http import (
-    HttpClient,
-)
-
 from ....core_ci import (
     AnsibleCoreCI,
+    CloudResource,
 )
 
 from . import (
@@ -40,28 +31,24 @@ from . import (
 
 class AzureCloudProvider(CloudProvider):
     """Azure cloud provider plugin. Sets up cloud resources before delegation."""
-    SHERLOCK_CONFIG_PATH = os.path.expanduser('~/.ansible-sherlock-ci.cfg')
 
-    def __init__(self, args):  # type: (IntegrationConfig) -> None
+    def __init__(self, args: IntegrationConfig) -> None:
         super().__init__(args)
 
-        self.aci = None
+        self.aci: t.Optional[AnsibleCoreCI] = None
 
         self.uses_config = True
 
-    def filter(self, targets, exclude):  # type: (t.Tuple[IntegrationTarget, ...], t.List[str]) -> None
+    def filter(self, targets: tuple[IntegrationTarget, ...], exclude: list[str]) -> None:
         """Filter out the cloud tests when the necessary config and resources are not available."""
         aci = self._create_ansible_core_ci()
 
         if aci.available:
             return
 
-        if os.path.isfile(self.SHERLOCK_CONFIG_PATH):
-            return
-
         super().filter(targets, exclude)
 
-    def setup(self):  # type: () -> None
+    def setup(self) -> None:
         """Setup the cloud resource before delegation and register a cleanup callback."""
         super().setup()
 
@@ -70,48 +57,27 @@ class AzureCloudProvider(CloudProvider):
 
         get_config(self.config_path)  # check required variables
 
-    def cleanup(self):  # type: () -> None
+    def cleanup(self) -> None:
         """Clean up the cloud resource and any temporary configuration files after tests complete."""
         if self.aci:
             self.aci.stop()
 
         super().cleanup()
 
-    def _setup_dynamic(self):  # type: () -> None
-        """Request Azure credentials through Sherlock."""
+    def _setup_dynamic(self) -> None:
+        """Request Azure credentials through ansible-core-ci."""
         display.info('Provisioning %s cloud environment.' % self.platform, verbosity=1)
 
         config = self._read_config_template()
         response = {}
 
-        if os.path.isfile(self.SHERLOCK_CONFIG_PATH):
-            sherlock_uri = read_text_file(self.SHERLOCK_CONFIG_PATH).splitlines()[0].strip() + '&rgcount=2'
+        aci = self._create_ansible_core_ci()
 
-            parts = urllib.parse.urlparse(sherlock_uri)
-            query_string = urllib.parse.parse_qs(parts.query)
-            base_uri = urllib.parse.urlunparse(parts[:4] + ('', ''))
+        aci_result = aci.start()
 
-            if 'code' not in query_string:
-                example_uri = 'https://example.azurewebsites.net/api/sandbox-provisioning'
-                raise ApplicationError('The Sherlock URI must include the API key in the query string. Example: %s?code=xxx' % example_uri)
-
-            display.info('Initializing azure/sherlock from: %s' % base_uri, verbosity=1)
-
-            http = HttpClient(self.args)
-            result = http.get(sherlock_uri)
-
-            display.info('Started azure/sherlock from: %s' % base_uri, verbosity=1)
-
-            if not self.args.explain:
-                response = result.json()
-        else:
-            aci = self._create_ansible_core_ci()
-
-            aci_result = aci.start()
-
-            if not self.args.explain:
-                response = aci_result['azure']
-                self.aci = aci
+        if not self.args.explain:
+            response = aci_result['azure']
+            self.aci = aci
 
         if not self.args.explain:
             values = dict(
@@ -131,14 +97,15 @@ class AzureCloudProvider(CloudProvider):
 
         self._write_config(config)
 
-    def _create_ansible_core_ci(self):  # type: () -> AnsibleCoreCI
+    def _create_ansible_core_ci(self) -> AnsibleCoreCI:
         """Return an Azure instance of AnsibleCoreCI."""
-        return AnsibleCoreCI(self.args, 'azure', 'azure', 'azure', persist=False)
+        return AnsibleCoreCI(self.args, CloudResource(platform='azure'))
 
 
 class AzureCloudEnvironment(CloudEnvironment):
     """Azure cloud environment plugin. Updates integration test environment after delegation."""
-    def get_environment_config(self):  # type: () -> CloudEnvironmentConfig
+
+    def get_environment_config(self) -> CloudEnvironmentConfig:
         """Return environment configuration for use in the test environment after delegation."""
         env_vars = get_config(self.config_path)
 
@@ -156,13 +123,13 @@ class AzureCloudEnvironment(CloudEnvironment):
             ansible_vars=ansible_vars,
         )
 
-    def on_failure(self, target, tries):  # type: (IntegrationTarget, int) -> None
+    def on_failure(self, target: IntegrationTarget, tries: int) -> None:
         """Callback to run when an integration target fails."""
         if not tries and self.managed:
             display.notice('If %s failed due to permissions, the test policy may need to be updated.' % target.name)
 
 
-def get_config(config_path):    # type: (str) -> t.Dict[str, str]
+def get_config(config_path: str) -> dict[str, str]:
     """Return a configuration dictionary parsed from the given configuration path."""
     parser = configparser.ConfigParser()
     parser.read(config_path)

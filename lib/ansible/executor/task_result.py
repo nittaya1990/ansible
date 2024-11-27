@@ -2,8 +2,7 @@
 
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 from ansible import constants as C
 from ansible.parsing.dataloader import DataLoader
@@ -23,11 +22,11 @@ CLEAN_EXCEPTIONS = (
 
 
 class TaskResult:
-    '''
+    """
     This class is responsible for interpreting the resulting data
     from an executed task, and provides helper methods for determining
     the result of a given task.
-    '''
+    """
 
     def __init__(self, host, task, return_data, task_fields=None):
         self._host = host
@@ -55,7 +54,7 @@ class TaskResult:
         if 'results' in self._result:
             results = self._result['results']
             # Loop tasks are only considered skipped if all items were skipped.
-            # some squashed results (eg, yum) are not dicts and can't be skipped individually
+            # some squashed results (eg, dnf) are not dicts and can't be skipped individually
             if results and all(isinstance(res, dict) and res.get('skipped', False) for res in results):
                 return True
 
@@ -94,7 +93,7 @@ class TaskResult:
         return ret
 
     def _check_key(self, key):
-        '''get a specific key from the result or its items'''
+        """get a specific key from the result or its items"""
 
         if isinstance(self._result, dict) and key in self._result:
             return self._result.get(key, False)
@@ -107,7 +106,7 @@ class TaskResult:
 
     def clean_copy(self):
 
-        ''' returns 'clean' taskresult object '''
+        """ returns 'clean' taskresult object """
 
         # FIXME: clean task_fields, _task and _host copies
         result = TaskResult(self._host, self._task, {}, self._task_fields)
@@ -140,7 +139,7 @@ class TaskResult:
         elif self._result:
             result._result = module_response_deepcopy(self._result)
 
-            # actualy remove
+            # actually remove
             for remove_key in ignore:
                 if remove_key in result._result:
                     del result._result[remove_key]

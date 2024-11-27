@@ -1,32 +1,32 @@
 # -*- coding: utf-8 -*-
 # Copyright: (c) 2018, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
+
+import shlex
 
 from abc import abstractmethod
-from random import choice
+from secrets import choice
 from string import ascii_lowercase
 from gettext import dgettext
 
 from ansible.errors import AnsibleError
-from ansible.module_utils.six.moves import shlex_quote
-from ansible.module_utils._text import to_bytes
+from ansible.module_utils.common.text.converters import to_bytes
 from ansible.plugins import AnsiblePlugin
 
 
 def _gen_id(length=32):
-    ''' return random string used to identify the current privilege escalation '''
+    """ return random string used to identify the current privilege escalation """
     return ''.join(choice(ascii_lowercase) for x in range(length))
 
 
 class BecomeBase(AnsiblePlugin):
 
-    name = None
+    name = None  # type: str | None
 
     # messages for detecting prompted password issues
-    fail = tuple()
-    missing = tuple()
+    fail = tuple()  # type: tuple[str, ...]
+    missing = tuple()  # type: tuple[str, ...]
 
     # many connection plugins cannot provide tty, set to True if your become
     # plugin requires a tty, i.e su
@@ -64,9 +64,9 @@ class BecomeBase(AnsiblePlugin):
             return cmd
 
         try:
-            cmd = shlex_quote('%s %s %s %s' % (shell.ECHO, self.success, shell.COMMAND_SEP, cmd))
+            cmd = shlex.quote('%s %s %s %s' % (shell.ECHO, self.success, shell.COMMAND_SEP, cmd))
         except AttributeError:
-            # TODO: This should probably become some more robust functionlity used to detect incompat
+            # TODO: This should probably become some more robust functionality used to detect incompat
             raise AnsibleError('The %s shell family is incompatible with the %s become plugin' % (shell.SHELL_FAMILY, self.name))
         exe = getattr(shell, 'executable', None)
         if exe and not noexe:
@@ -83,14 +83,14 @@ class BecomeBase(AnsiblePlugin):
         return any(b_success in l.rstrip() for l in b_output.splitlines(True))
 
     def check_password_prompt(self, b_output):
-        ''' checks if the expected password prompt exists in b_output '''
+        """ checks if the expected password prompt exists in b_output """
         if self.prompt:
             b_prompt = to_bytes(self.prompt).strip()
             return any(l.strip().startswith(b_prompt) for l in b_output.splitlines())
         return False
 
     def _check_password_error(self, b_out, msg):
-        ''' returns True/False if domain specific i18n version of msg is found in b_out '''
+        """ returns True/False if domain specific i18n version of msg is found in b_out """
         b_fail = to_bytes(dgettext(self.name, msg))
         return b_fail and b_fail in b_out
 
